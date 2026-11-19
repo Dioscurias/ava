@@ -54,10 +54,11 @@ export function Workspace({children}: {children: React.ReactNode}) {
     if (ready) try {localStorage.setItem("astra-light-workspace-v1", JSON.stringify(state));} catch { /* Storage is optional. */ }
   }, [state, ready]);
   const links = [{href:"/agent", label:"Agent", icon:MessageSquare},{href:"/activity",label:"Activity",icon:Activity},{href:"/settings",label:"Settings",icon:Settings2}];
+  if (process.env.NEXT_PUBLIC_AVA_DEVNET_PROGRAM) links.push({href:"/devnet",label:"Devnet",icon:Wallet});
   return <Store.Provider value={{state, setState, ready, openingPrompt}}><ConnectionProvider endpoint={endpoint}><WalletProvider wallets={adapters}><div className="workspace">
     <header className="app-header"><Brand/><nav aria-label="Workspace">{links.map(({href,label,icon:Icon}) => <Link key={href} href={href} aria-current={path === href || (href === "/agent" && path.startsWith("/agent/")) || (href === "/activity" && path.startsWith("/payments")) ? "page" : undefined}><Icon size={16}/>{label}</Link>)}</nav><WalletMenu/></header>
     {state.paused && <div className="paused-banner" role="status">Agent paused. <Link href="/settings">Manage permissions</Link></div>}
     {children}
-    <footer className="app-footer"><CircleHelp size={14}/> Simulation mode · No funds move on-chain</footer>
+    <footer className="app-footer"><CircleHelp size={14}/> {path === "/devnet" ? "Solana Devnet · Test tokens only" : "Simulation mode · No funds move on-chain"}</footer>
   </div></WalletProvider></ConnectionProvider></Store.Provider>;
 }

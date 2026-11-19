@@ -1,9 +1,36 @@
 {
   "name": "ava",
   "private": true,
-  "engines": {"node": "22.x"},
+  "engines": {
+    "node": "22.x"
+  },
   "version": "1.0.0",
-  "scripts": {"dev":"next dev","build":"next build","start":"next start","test":"tsx --test tests/*.test.ts","typecheck":"tsc --noEmit"},
-  "dependencies": {"next":"^15.5.0","react":"^19","react-dom":"^19","framer-motion":"^12","lucide-react":"^0.468.0","@solana/wallet-adapter-react":"^0.15.39","@solana/web3.js":"^1.98.4","geist":"^1.4.0"},
-  "devDependencies":{"typescript":"^5.8","@types/node":"^22","@types/react":"^19","@types/react-dom":"^19","tailwindcss":"^4","@tailwindcss/postcss":"^4","tsx":"^4"}
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "test": "tsx --test tests/*.test.ts",
+    "typecheck": "tsc --noEmit",
+    "test:program": "tsx tests/devnet-flow.ts"
+  },
+  "dependencies": {
+    "@solana/spl-token": "0.4.14",
+    "@solana/wallet-adapter-react": "^0.15.39",
+    "@solana/web3.js": "^1.98.4",
+    "framer-motion": "^12",
+    "geist": "^1.4.0",
+    "lucide-react": "^0.468.0",
+    "next": "^15.5.0",
+    "react": "^19",
+    "react-dom": "^19"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4",
+    "@types/node": "^22",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "tailwindcss": "^4",
+    "tsx": "^4",
+    "typescript": "^5.8"
+  }
 }

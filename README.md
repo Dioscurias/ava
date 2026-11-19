@@ -28,3 +28,22 @@ npm run dev
 ```
 
 Open http://localhost:3000.
+
+## Devnet escrow
+
+The Rust program in `program/` holds Circle test USDC in a token account controlled by a program-derived address. The payer sets an on-chain spending cap and permissions, funds the escrow, signs a condition attestation, and signs or cancels release. The program checks the recipient, balance accounting, attestation, and pause setting independently of the browser. Conditions are manually attested by the payer. On-chain addresses, amounts, and conditions are public.
+
+Set the Vercel build variable `NEXT_PUBLIC_AVA_DEVNET_PROGRAM` to the deployed Devnet program address to enable the Devnet tab. The app checks the Devnet genesis hash and that the configured program account is executable before requesting a transaction signature. Keep deployer and program keypairs outside Git. A live round trip needs a wallet funded with Devnet SOL, Circle test USDC, and a second wallet address. [Circle test USDC faucet](https://faucet.circle.com/).
+
+### Test the on-chain program locally
+
+With the Solana CLI, cargo-build-sbf, and solana-test-validator installed:
+
+```sh
+cargo build-sbf --manifest-path program/Cargo.toml
+solana -u devnet program dump TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA /tmp/ava-spl-token.so
+solana -u devnet program dump ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL /tmp/ava-spl-ata.so
+AVA_TEST_TOKEN_PROGRAM=/tmp/ava-spl-token.so AVA_TEST_ATA_PROGRAM=/tmp/ava-spl-ata.so npm run test:program
+```
+
+The test starts its own validator and provides a local test mint fixture. It measures SPL token balances across funding, release, and cancellation, and verifies that unauthorized state transitions fail.
