@@ -25,7 +25,7 @@ a,button,summary{transition:background .2s,color .2s,border-color .2s}
 .text-link:hover{text-decoration:underline}
 .landing{background:var(--bg);color:var(--ink)}
 .hero :focus-visible{outline-color:var(--accent)}
-.hero{position:relative;isolation:isolate;display:flex;flex-direction:column;min-height:100svh;background:#1d2923;color:#f5f7f5}
+.hero{position:relative;isolation:isolate;overflow:clip;display:flex;flex-direction:column;min-height:100svh;background:#1d2923;color:#f5f7f5}
 .hero::after{content:"";position:absolute;z-index:-1;inset:0;background:#0001;pointer-events:none}
 .hero-image{z-index:-2;object-fit:cover;object-position:63% center;filter:brightness(1.26) contrast(.94)}
 .hero-orb{position:absolute;z-index:0;left:73%;top:48%;transform:translate(-50%,-50%);width:min(50vw,82svh,820px);pointer-events:none}
