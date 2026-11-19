@@ -41,3 +41,15 @@ test("paused escrows refuse top-ups and cannot release until resumed", () => {
   const resumed = changeEscrow(paused, id, "resume");
   assert.equal(changeEscrow(resumed, id, "add", 500).escrows[0].amount, 45500);
 });
+
+test("drafts conversational requests and keeps missing terms for clarification", () => {
+  assert.deepEqual(parsePayment("So I wanna make a payment Dave Chase the amount is $100 and that's his recipient so please"), {
+    amount: 10000, recipient: "Dave Chase", condition: "You confirm the release"
+  });
+  assert.deepEqual(parsePayment("Could you pay Dave Chase $100 once the invoice arrives?"), {
+    amount: 10000, recipient: "Dave Chase", condition: "the invoice arrives"
+  });
+  assert.equal(parsePayment("I want to pay Dave Chase"), null);
+  assert.equal(parsePayment("Make a payment Dave Chase the amount is -$100"), null);
+  assert.equal(parsePayment("Make a payment Dave Chase the amount is $100 or $120"), null);
+});

@@ -20,13 +20,24 @@ export const active = (e: Escrow) => e.status !== "Completed" && e.status !== "C
 export const committed = (state: State) => state.escrows.reduce((total, e) => total + (e.status !== "Cancelled" ? e.amount : 0), 0);
 export const money = (amount: number) => new Intl.NumberFormat("en-US", {minimumFractionDigits: 2, maximumFractionDigits: 2}).format(amount / 100);
 
+const paymentLead = /^(?:so[,\s]+)?(?:(?:i\s+(?:wanna|want\s+to|would\s+like\s+to)|i['’]d\s+like\s+to|(?:could|can|would)\s+you|please)[,\s]+)?/i;
+const paymentAmount = String.raw`\$?([0-9]+(?:,[0-9]{3})*(?:\.[0-9]{1,2})?)(?:\s*(?:USDC|USD|dollars?))?`;
+const releaseCondition = String.raw`(?:\s+(?:when|once|after|until|if)\s+(.+))?`;
+const amountFirst = new RegExp(String.raw`^(?:send|pay|hold|escrow|set aside|make (?:a )?payment(?: of)?)\s+${paymentAmount}\s+(?:to|for)\s+(.+?)${releaseCondition}$`, "i");
+const recipientFirst = new RegExp(String.raw`^(?:(?:send|make) (?:a )?payment(?:\s+(?:to|for))?|pay)\s+(.+?)[,;:]?\s+(?:(?:and\s+)?(?:the\s+)?amount\s*(?:is|:|of)\s*)?${paymentAmount}${releaseCondition}$`, "i");
+
 export function parsePayment(input: string): Draft | null {
-  const match = input.trim().match(/^(?:please\s+)?(?:send|pay|hold|escrow|set aside)\s+\$?(\d+(?:,\d{3})*(?:\.\d{1,2})?)\s*(?:USDC|USD)?\s+(?:to|for)\s+(.+?)(?:\s+(?:when|once|after|until|if)\s+(.+))?[.!?]?$/i);
-  if (!match) return null;
-  const amount = Math.round(Number(match[1].replaceAll(",", "")) * 100);
-  const recipient = match[2].trim();
+  const instruction = input.trim().replace(paymentLead, "")
+    .replace(/(?:[,\s]+and\s+that['’]s\s+(?:his|her|their|the)\s+recipient)?(?:[,\s]+(?:so\s+)?please)?[.!?]*$/i, "");
+  const direct = instruction.match(amountFirst);
+  const reverse = direct ? null : instruction.match(recipientFirst);
+  if (!direct && !reverse) return null;
+  const [value, payee, condition] = direct ? direct.slice(1) : [reverse![2], reverse![1], reverse![3]];
+  const amount = Math.round(Number(value.replaceAll(",", "")) * 100);
+  const recipient = payee.trim();
+  if (/\$|(?:^|\s)(?:-\d|\d+(?:\.\d+)?\s*(?:USDC|USD|dollars?)\b)/i.test(recipient)) return null;
   if (!Number.isSafeInteger(amount) || amount <= 0 || !recipient || recipient.length > 100) return null;
-  return {amount, recipient, condition: match[3]?.trim().replace(/[.!?]$/, "") || "You confirm the release"};
+  return {amount, recipient, condition: condition?.trim().replace(/[.!?]$/, "") || "You confirm the release"};
 }
 
 export function guard(state: State, amount: number) {
