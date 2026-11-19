@@ -10,7 +10,7 @@ Ava turns a natural-language payment instruction into a USDC escrow proposal tha
 4. Select **Mark condition met**, confirm, then select **Release funds** and confirm. The timeline records each step. The Activity page shows the completed payment.
 5. In **Settings**, pause the agent and try confirming another draft. Ava blocks the action. Resume the agent to continue.
 
-The walkthrough needs no wallet, microphone, or API key. State is stored in the current browser. An installed Solana wallet is optional and enables public-address display. The **Speak** control uses browser dictation. **Listen** plays Ava’s reply through the browser voice by default. To enable ElevenLabs reply playback, set server-only `ELEVENLABS_API_KEY` and `ELEVENLABS_VOICE_ID` and redeploy. Use a text-to-speech-scoped key with a provider credit limit for public demos.
+The walkthrough needs no wallet, microphone, or API key. State is stored in the current browser. An installed Solana wallet is optional and enables public-address display. The **Speak** control uses browser dictation. **Listen** uses the ElevenLabs Sarah voice when the server-only `ELEVENLABS_API_KEY` is set. Set `ELEVENLABS_VOICE_ID` to override Sarah. Browser playback remains available when ElevenLabs is unconfigured or unavailable. Use a text-to-speech-scoped key with a provider credit limit for public demos.
 
 ## Simulation boundary
 
