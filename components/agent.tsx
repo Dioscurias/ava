@@ -8,7 +8,10 @@ import {useWallet} from "@solana/wallet-adapter-react";
 import {useCallback, useEffect, useLayoutEffect, useRef, useState} from "react";
 import {motion, useReducedMotion} from "framer-motion";
 import {ArrowRight, ArrowUp, AudioLines, ChevronDown, LockKeyhole, Mic, ShieldCheck} from "lucide-react";
-import {active, addEscrow, committed, demoInstruction, guard, money, parsePayment, type Draft} from "../lib/payments";
+import {active, addEscrow, committed, demoInstruction, guard, money, type Draft} from "../lib/payments";
+import {parseMarketCondition, type MarketChoice} from "../lib/gemini-condition";
+import {PaymentDraft} from "./payment-draft";
+import {changedFields, chooseDraft, confirmDraft, draftTurn, editDraft, emptyDraft, nextDraftQuestion, readyDraft, type DraftField, type DraftMemory} from "../lib/draft-memory";
 import {StatusBadge, useWorkspace} from "./workspace";
 
 type RecognitionResult = ArrayLike<{transcript: string}> & {isFinal: boolean};
@@ -23,9 +26,12 @@ type Recognition = {
   onend: (() => void) | null;
   onerror: (() => void) | null;
 };
-type Turn = {id: string; prompt: string; reply: string; draft?: Draft; escrow?: string};
+type Turn = {id: string; prompt: string; reply: string};
+type Market = {condition: string; choices?: MarketChoice[]; selected?: MarketChoice; notice: string};
+const btcPrompt = "Hold 5 USDC for Dave until the next BTC 5-minute round settles up";
 const prompts = [
   {label:"Hold a payment", value:demoInstruction},
+  {label:btcPrompt, value:btcPrompt},
   {label:"Check payment status", value:"What payments are pending?"},
   {label:"Review my limits", value:"What can you spend?"},
   {label:"Get receiving details", value:"How do I receive USDC?"},
@@ -39,6 +45,13 @@ export function Agent({demo, intro = false, elevenLabs = false}: {demo: boolean;
   const [arriving, setArriving] = useState(false);
   const [input, setInput] = useState(demo ? prompts[0].value : "");
   const [turns, setTurns] = useState<Turn[]>([]);
+  const [memory, setMemory] = useState(emptyDraft);
+  const memoryRef = useRef(emptyDraft);
+  const [highlighted, setHighlighted] = useState<DraftField[]>([]);
+  const highlightTimer = useRef<number | undefined>(undefined);
+  const [market, setMarket] = useState<Market>();
+  const [escrow, setEscrow] = useState<string>();
+  const [transcript, setTranscript] = useState("");
   const [listening, setListening] = useState(false);
   const [notice, setNotice] = useState("");
   const [panelOpen, setPanelOpen] = useState(true);
@@ -59,18 +72,74 @@ export function Agent({demo, intro = false, elevenLabs = false}: {demo: boolean;
     }
   }, []);
 
+  const applyDraft = useCallback((next: DraftMemory) => {
+    const changed = changedFields(memoryRef.current.current, next.current);
+    memoryRef.current = next;
+    setMemory(next);
+    if (next.current.status !== "confirmed") setEscrow(undefined);
+    if (changed.length) {
+      setHighlighted(changed);
+      window.clearTimeout(highlightTimer.current);
+      highlightTimer.current = window.setTimeout(() => setHighlighted([]), 2000);
+    }
+  }, []);
+
+  useEffect(() => () => window.clearTimeout(highlightTimer.current), []);
+
+  const condition = memory.current.condition;
+  const marketCondition = condition && parseMarketCondition(condition) ? condition : undefined;
+  useEffect(() => {
+    if (!marketCondition) {setMarket(undefined); return;}
+    const controller = new AbortController();
+    setMarket({condition: marketCondition, notice: "Looking up active Gemini markets…"});
+    void fetch(`/api/gemini?condition=${encodeURIComponent(marketCondition)}`, {signal: controller.signal})
+      .then(async response => {
+        if (!response.ok) throw new Error("Market lookup failed");
+        const {choices}: {choices: MarketChoice[]} = await response.json();
+        if (controller.signal.aborted) return;
+        if (!choices.length) setMarket({condition: marketCondition, notice: "I couldn’t find an active Gemini market. Try its exact title."});
+        else if (choices.length === 1) setMarket({condition: marketCondition, selected: choices[0], notice: ""});
+        else setMarket({condition: marketCondition, choices, notice: "Which Gemini contract should determine release?"});
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) setMarket({condition: marketCondition, notice: "Gemini market data is temporarily unavailable."});
+      });
+    return () => controller.abort();
+  }, [marketCondition]);
+
+  const confirm = useCallback(() => {
+    if (!ready) return "The workspace is still loading.";
+    const current = memoryRef.current;
+    if (current.current.status === "confirmed") return "This draft is already confirmed.";
+    if (current.choices) return "Choose a recipient before confirming.";
+    const draft = readyDraft(current);
+    if (!draft) return nextDraftQuestion(current.current);
+    if (parseMarketCondition(draft.condition)) return "Gemini market drafts are preview only.";
+    const issue = guard(state, draft.amount);
+    if (issue) return issue;
+    const id = "AL-" + crypto.randomUUID().slice(0, 8).toUpperCase();
+    setState(currentState => addEscrow(currentState, draft, id));
+    applyDraft(confirmDraft(current));
+    setEscrow(id);
+    return `I placed ${money(draft.amount)} USDC in demo escrow for ${draft.recipient}.`;
+  }, [applyDraft, ready, setState, state]);
+
   const addTurn = useCallback((prompt: string) => {
-    const draft = parsePayment(prompt);
     let reply = "For a payment, tell me the amount and recipient. You can also tell me what needs to happen before release.";
-    if (draft) reply = "Review the terms before placing funds in escrow.";
+    const isConfirmation = /^confirm(?: (?:it|(?:the )?(?:draft|payment|escrow)))?[.!?]*$/i.test(prompt.trim());
+    const repair = isConfirmation ? null : draftTurn(memoryRef.current, prompt);
+    if (isConfirmation) reply = confirm();
+    else if (repair) {
+      applyDraft(repair.memory);
+      reply = repair.reply;
+    }
     else if (/pending|status|escrows|history|activity/i.test(prompt)) reply = escrows.length ? escrows.map(e => `${e.recipient} · ${money(e.amount)} USDC · ${e.status}. ${e.condition}.`).join("\n") : "There are no open escrows.";
     else if (/limit|spend|allow|permission/i.test(prompt)) reply = `You have ${money(remaining)} USDC available under your ${money(state.limit)} USDC workspace limit. Funding is ${state.allowHold ? "enabled" : "disabled"}, and releases are ${state.allowRelease ? "enabled" : "disabled"}.`;
     else if (/receiv|deposit/i.test(prompt)) reply = publicKey ? `Connected Solana address: ${publicKey.toBase58()}. Incoming transfers are simulated in this workspace.` : "Connect a Solana wallet from the workspace header to see its public address. Incoming transfers are simulated in this workspace.";
-    const turn = {id: crypto.randomUUID(), prompt, reply, draft: draft ?? undefined};
-    setTurns(previous => [...previous, turn]);
+    setTurns(previous => [...previous, {id: crypto.randomUUID(), prompt, reply}]);
     setInput("");
     setNotice("");
-  }, [escrows, publicKey, remaining, state.allowHold, state.allowRelease, state.limit]);
+  }, [applyDraft, confirm, escrows, publicKey, remaining, state.allowHold, state.allowRelease, state.limit]);
 
   useEffect(() => {if (intro) router.prefetch("/agent/chat");}, [intro, router]);
 
@@ -84,7 +153,7 @@ export function Agent({demo, intro = false, elevenLabs = false}: {demo: boolean;
     headingRef.current?.focus({preventScroll: true});
   }, [addTurn, intro, openingPrompt, ready]);
 
-  function send(prompt: string) {
+  const send = useCallback((prompt: string) => {
     const instruction = prompt.trim().slice(0, 600);
     if (!instruction || leaving) return;
     if (intro) {
@@ -94,7 +163,9 @@ export function Agent({demo, intro = false, elevenLabs = false}: {demo: boolean;
     } else {
       addTurn(instruction);
     }
-  }
+  }, [addTurn, intro, leaving, openingPrompt, router]);
+  const latestSend = useRef(send);
+  useLayoutEffect(() => {latestSend.current = send;}, [send]);
 
   function submit(event: React.FormEvent) {
     event.preventDefault();
@@ -104,23 +175,21 @@ export function Agent({demo, intro = false, elevenLabs = false}: {demo: boolean;
       voiceRef.current.stop();
       voiceRef.current = null;
       setListening(false);
+      setTranscript("");
     }
     send(input);
   }
 
-  function confirm(turn: Turn) {
-    if (!turn.draft || turn.escrow) return;
-    const issue = guard(state, turn.draft.amount);
-    if (issue) {setNotice(issue); return;}
-    const id = "AL-" + crypto.randomUUID().slice(0, 8).toUpperCase();
-    const draft = turn.draft;
-    setState(current => addEscrow(current, draft, id));
-    setTurns(previous => previous.map(item => item.id === turn.id ? {...item, escrow:id} : item));
-    setNotice("");
-  }
-
   function dictate() {
-    if (listening) {voiceRef.current?.stop(); return;}
+    if (listening) {
+      stopReplyVoice();
+      const active = voiceRef.current;
+      voiceRef.current = null;
+      active?.stop();
+      setListening(false);
+      setTranscript("");
+      return;
+    }
     const browser = window as Window & {SpeechRecognition?: new () => Recognition; webkitSpeechRecognition?: new () => Recognition};
     const Engine = browser.SpeechRecognition ?? browser.webkitSpeechRecognition;
     if (!Engine) {setNotice("Voice input is unavailable in this browser. You can still type an instruction."); return;}
@@ -129,23 +198,26 @@ export function Agent({demo, intro = false, elevenLabs = false}: {demo: boolean;
     voiceRef.current = recognition;
     recognition.lang = "en-US";
     recognition.continuous = false;
-    recognition.interimResults = false;
+    recognition.interimResults = true;
 
     function finish() {
       if (voiceRef.current !== recognition) return false;
       voiceRef.current = null;
       setListening(false);
+      setTranscript("");
       return true;
     }
 
     recognition.onresult = event => {
+      if (voiceRef.current !== recognition) return;
+      setTranscript(Array.from(event.results).map(result => result[0]?.transcript ?? "").join(" ").trim());
       const instruction = Array.from(event.results)
         .filter(result => result.isFinal)
         .map(result => result[0]?.transcript ?? "")
         .join(" ").trim();
       if (!instruction || !finish()) return;
       recognition.stop();
-      send(instruction);
+      latestSend.current(instruction);
     };
     recognition.onend = () => {finish();};
     recognition.onerror = () => {
@@ -165,11 +237,19 @@ export function Agent({demo, intro = false, elevenLabs = false}: {demo: boolean;
     setInput(prompt.value);
     inputRef.current?.focus();
   }}>{prompt.label}<ArrowRight size={14}/></button>)}</div>;
+  function toggleSpokenReplies() {
+    if (state.voice) stopReplyVoice();
+    setState(current => ({...current, voice: !current.voice}));
+  }
+
   const composer = (
       <div className="composer-wrap">
         {notice && <p className="notice" role="status">{notice}</p>}
-        <form className="composer" onSubmit={submit}>{!intro && <VoiceOrb listening={listening}/>}<input ref={inputRef} value={input} onChange={e => setInput(e.target.value)} maxLength={600} aria-label="Payment instruction" placeholder="Tell Ava what to do…"/>{state.voice && <button className="icon-button dictation-control" type="button" title="Dictate an instruction" aria-label={listening ? "Stop dictation" : "Start dictation"} aria-pressed={listening} onClick={dictate}>{listening ? <AudioLines size={20}/> : <Mic size={19}/>}<span>{listening ? "Stop" : "Speak"}</span></button>}<button type="submit" className="send" aria-label="Send instruction" disabled={!input.trim() || leaving}><ArrowUp size={20}/></button></form>
-        <p className="composer-caption" role="status">{listening ? "Listening…" : ""}</p>
+        <form className="composer" onSubmit={submit}>{!intro && <VoiceOrb listening={listening}/>}<input ref={inputRef} value={input} onChange={e => setInput(e.target.value)} maxLength={600} aria-label="Payment instruction" placeholder="Tell Ava what to do…"/>{state.microphone !== false && <button className="icon-button dictation-control" type="button" title="Dictate an instruction" aria-label={listening ? "Stop dictation" : "Start dictation"} aria-pressed={listening} onClick={dictate}>{listening ? <AudioLines size={20}/> : <Mic size={19}/>}<span>{listening ? "Stop" : "Speak"}</span></button>}<button type="submit" className="send" aria-label="Send instruction" disabled={!input.trim() || leaving}><ArrowUp size={20}/></button></form>
+        <button className="reply-voice" type="button" aria-pressed={state.voice} onClick={toggleSpokenReplies}>
+          Spoken replies {state.voice ? "on" : "off"}
+        </button>
+        <p className="composer-caption" role="status">{listening ? transcript || "Listening…" : ""}</p>
       </div>
   );
 
@@ -191,7 +271,26 @@ export function Agent({demo, intro = false, elevenLabs = false}: {demo: boolean;
       <div className="agent-top"><div><h1 ref={headingRef} tabIndex={-1}>Ava agent</h1></div></div>
       <div className="conversation">
         {turns.length === 0 && <div className="welcome"><h2>What should move?</h2><p>Tell Ava who to pay and when.</p>{suggestions}</div>}
-        <div className="turns" aria-live="polite">{turns.map(turn => <motion.article key={turn.id} initial={reduced || (arriving && turn === turns[0]) ? false : {opacity:0, y:8}} animate={{opacity:1,y:0}} className="turn"><p className="user-turn">{turn.prompt}</p><div className="agent-turn"><Image className="reply-orb" src="/ava-reply-orb.webp" alt="" width={20} height={20} unoptimized/><div><div className="reply-heading"><strong>Ava</strong>{state.voice && <ReplyVoice text={turn.draft ? `I’ve drafted ${money(turn.draft.amount)} U.S.D.C. for ${turn.draft.recipient}. Release condition: ${turn.draft.condition}. Review the terms before placing funds in escrow.` : turn.reply} elevenLabs={elevenLabs} autoPlay={!listening && turn.id === turns.at(-1)?.id}/>}</div><p>{turn.reply}</p>{turn.draft && <div className="draft"><h3>{money(turn.draft.amount)} <small>USDC</small></h3><dl><div><dt>Recipient</dt><dd>{turn.draft.recipient}</dd></div><div><dt>Release condition</dt><dd>{turn.draft.condition}</dd></div></dl>{turn.escrow ? <Link className="text-link" href={`/payments/${turn.escrow}`}>View demo escrow <ArrowRight size={15}/></Link> : <button className="button primary" disabled={!ready} onClick={() => confirm(turn)}>Confirm demo escrow <LockKeyhole size={14}/></button>}</div>}</div></div></motion.article>)}</div>
+        <div className="turns" aria-live="polite">{turns.map(turn => <motion.article key={turn.id} initial={reduced || (arriving && turn === turns[0]) ? false : {opacity:0, y:8}} animate={{opacity:1,y:0}} className="turn">
+          <p className="user-turn">{turn.prompt}</p>
+          <div className="agent-turn"><Image className="reply-orb" src="/ava-reply-orb.webp" alt="" width={20} height={20} unoptimized/>
+            <div><div className="reply-heading"><strong>Ava</strong>{state.voice && <ReplyVoice text={turn.reply} elevenLabs={elevenLabs} autoPlay={!listening && turn.id === turns.at(-1)?.id}/>}</div><p>{turn.reply}</p></div>
+          </div>
+        </motion.article>)}</div>
+        <PaymentDraft memory={memory} highlighted={highlighted} escrow={escrow} canConfirm={ready && Boolean(readyDraft(memory))}
+          confirm={() => addTurn("Confirm")} undo={() => addTurn("Undo")}
+          edit={(patch: Partial<Draft>) => {
+            const next = editDraft(memoryRef.current, patch);
+            applyDraft(next);
+            setNotice(next.choices ? "Choose a recipient for this payment." : "Draft updated.");
+          }}
+          choose={index => {
+            const next = chooseDraft(memoryRef.current, index);
+            applyDraft(next);
+            setNotice(nextDraftQuestion(next.current));
+          }}
+          market={marketCondition ? market?.condition === marketCondition ? market : {notice: "Looking up active Gemini markets…"} : undefined}
+          chooseMarket={selected => {if (marketCondition) setMarket({condition: marketCondition, selected, notice: ""});}}/>
         <div ref={conversationEnd}/>
       </div>
       {composer}

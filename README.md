@@ -47,3 +47,5 @@ AVA_TEST_TOKEN_PROGRAM=/tmp/ava-spl-token.so AVA_TEST_ATA_PROGRAM=/tmp/ava-spl-a
 ```
 
 The test starts its own validator and provides a local test mint fixture. It measures SPL token balances across funding, release, and cancellation, and verifies that unauthorized state transitions fail.
+
+Judge mode and deployment instructions are in [docs/DEPLOYED.md](docs/DEPLOYED.md). The **Simulation / Devnet** switch keeps the browser-only walkthrough and the sponsored test-token flow separate.

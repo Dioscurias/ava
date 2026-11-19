@@ -20,7 +20,8 @@ export default function SettingsPage() {
   const toggles = [
     {key:"allowHold", title:"Fund escrows", body:"Allow new holds and additions to open escrows."},
     {key:"allowRelease", title:"Release funds", body:"Allow confirmed releases and early approvals."},
-    {key:"voice", title:"Voice", body:"Show dictation and spoken replies in the agent workspace."}
+    {key:"microphone", title:"Microphone", body:"Enable dictation in the agent workspace."},
+    {key:"voice", title:"Spoken replies", body:"Read Ava’s replies aloud automatically."}
   ] as const;
   return <main className="app-main detail-page"><h1>Settings</h1><div className="settings-list">
   <section className="panel detail-card"><h2><ShieldCheck size={20}/> Spending limit</h2><p>Total USDC the demo workspace can hold or release. Cancelling an escrow restores that capacity.</p><form className="settings-form" onSubmit={save}><label>Workspace limit (USDC)<input required value={limit ?? (state.limit / 100).toFixed(2)} onChange={e => {setLimit(e.target.value); setMessage("");}} inputMode="decimal"/></label><button className="button primary" disabled={!ready}>Save limit</button></form>{message && <p role="status">{message}</p>}</section>

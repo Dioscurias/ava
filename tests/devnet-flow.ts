@@ -1,4 +1,7 @@
 import assert from "node:assert/strict";
+import {randomBytes} from "node:crypto";
+import {runJudgeAction} from "../lib/judge-devnet.server";
+import {devnetGenesis} from "../lib/devnet";
 import {spawn} from "node:child_process";
 import {mkdtemp, rm, writeFile} from "node:fs/promises";
 import {tmpdir} from "node:os";
@@ -20,7 +23,8 @@ async function main() {
   const associatedBinary = process.env.AVA_TEST_ATA_PROGRAM;
   if (!tokenBinary || !associatedBinary) throw Error("Set AVA_TEST_TOKEN_PROGRAM and AVA_TEST_ATA_PROGRAM to the Devnet SPL program dumps.");
   const payer = Keypair.generate();
-  const recipient = Keypair.generate().publicKey;
+  const recipientSigner = Keypair.generate();
+  const recipient = recipientSigner.publicKey;
   const program = Keypair.generate().publicKey;
   const ledger = await mkdtemp(join(tmpdir(),"ava-validator-"));
   const mintDump = join(ledger,"mint.json");
@@ -120,6 +124,41 @@ async function main() {
     assert.equal(state.policy?.committed,2_000_000n);
     assert.deepEqual(state.outgoing.map(entry=>entry.status).sort(),[3,4]);
     console.log("On-chain escrow passed: fund, cap, attestation, pause, recipient validation, release, duplicate rejection, cancellation.");
+    process.env.AVA_DEVNET_PROGRAM = program.toBase58();
+    process.env.AVA_JUDGE_PAYER_KEYPAIR = JSON.stringify([...payer.secretKey]);
+    process.env.AVA_JUDGE_RECIPIENT_KEYPAIR = JSON.stringify([...recipientSigner.secretKey]);
+    delete process.env.AVA_JUDGE_ACCESS_CODE;
+
+    // Exercise the production signer and instruction path with the local validator
+    // and a fixture mint. Only its genesis identity is substituted for this test.
+    const localJudge = new Proxy(connection,{
+      get(target,property,receiver) {
+        if (property==="getGenesisHash") return async ()=>devnetGenesis;
+        const value=Reflect.get(target,property,receiver);
+        return typeof value==="function" ? value.bind(target) : value;
+      },
+    });
+    for (const action of ["release","cancel"] as const) {
+      const requestId = randomBytes(16).toString("hex");
+      const payload = {requestId,condition:`Judge integration: ${action}`};
+      const funded = await runJudgeAction("fund",payload,localJudge);
+      assert.equal(funded.amount,"0.10");
+      assert.equal(funded.explorerUrl,`https://explorer.solana.com/tx/${funded.signature}?cluster=devnet`);
+      assert.equal((await runJudgeAction("fund",payload,localJudge)).signature,funded.signature);
+      await assert.rejects(runJudgeAction("cancel",{requestId,proof:"wrong"},localJudge),/does not belong/);
+      const authorized = {requestId,proof:funded.proof};
+      if (action==="release") {
+        await assert.rejects(runJudgeAction("release",authorized,localJudge),/unavailable/);
+        assert((await runJudgeAction("attest",authorized,localJudge)).signature);
+      }
+      const completed = await runJudgeAction(action,authorized,localJudge);
+      assert.equal((await runJudgeAction(action,authorized,localJudge)).signature,completed.signature);
+    }
+    assert.equal((await getAccount(connection,recipientAccount)).amount,2_100_000n);
+    assert.equal((await getAccount(connection,source)).amount,17_900_000n);
+    console.log("Sponsored judge flows passed: confirmed release and refund, capability enforcement, Explorer receipts, idempotent retry.");
+    // Allow web3.js to close the last subscription before stopping the validator.
+    await delay(700);
   } finally {
     validator.kill("SIGTERM");
     await ready.catch(()=>null);

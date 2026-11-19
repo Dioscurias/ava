@@ -11,7 +11,10 @@
     "start": "next start",
     "test": "tsx --test tests/*.test.ts",
     "typecheck": "tsc --noEmit",
-    "test:program": "tsx tests/devnet-flow.ts"
+    "test:program": "tsx tests/devnet-flow.ts",
+    "devnet:roundtrip": "node --env-file-if-exists=.env --import tsx scripts/devnet-roundtrip.ts",
+    "test:streams": "vitest run streams/filter.test.ts",
+    "test:drafts": "vitest run lib/draft-memory.test.ts"
   },
   "dependencies": {
     "@elevenlabs/elevenlabs-js": "^2.79.0",
@@ -32,6 +35,7 @@
     "@types/react-dom": "^19",
     "tailwindcss": "^4",
     "tsx": "^4",
-    "typescript": "^5.8"
+    "typescript": "^5.8",
+    "vitest": "^4.1.12"
   }
 }

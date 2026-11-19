@@ -63,11 +63,11 @@ function u64(value: bigint) {
   return data;
 }
 
-function policyAddress(program: PublicKey, payer: PublicKey) {
+export function policyAddress(program: PublicKey, payer: PublicKey) {
   return PublicKey.findProgramAddressSync([Buffer.from("policy"), payer.toBuffer()], program)[0];
 }
 
-function storedEscrow(key: PublicKey, data: Buffer): LiveEscrow {
+export function storedEscrow(key: PublicKey, data: Buffer): LiveEscrow {
   const status = data[1];
   if (data.length !== escrowSize || data[0] !== 1 || status < 1 || status > 4) throw Error("Unexpected escrow account format.");
   return {
@@ -109,9 +109,13 @@ export function configurePolicy(programId: PublicKey, payer: PublicKey, limit: b
   }));
 }
 
+export function escrowAddress(programId: PublicKey, payer: PublicKey, nonce: Buffer) {
+  return PublicKey.findProgramAddressSync([Buffer.from("escrow"), payer.toBuffer(), nonce], programId)[0];
+}
+
 export function fundEscrow(programId: PublicKey, payer: PublicKey, draft: LiveDraft) {
   const {nonce} = draft;
-  const key = PublicKey.findProgramAddressSync([Buffer.from("escrow"), payer.toBuffer(), nonce], programId)[0];
+  const key = escrowAddress(programId,payer,nonce);
   const source = getAssociatedTokenAddressSync(devnetMint,payer);
   const vault = getAssociatedTokenAddressSync(devnetMint,key,true);
   return new Transaction().add(

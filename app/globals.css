@@ -260,3 +260,40 @@ button.panel-heading:hover{background:var(--light-grey)}
 .reply-voice{display:inline-flex;align-items:center;gap:5px;color:var(--forest);font-size:12px;min-height:28px}
 .reply-voice:hover{text-decoration:underline}
 @media(max-width:360px){.dictation-control span{display:none}}
+
+.mode-switch{display:flex;gap:6px;justify-content:center;padding:4px 16px 12px;font-size:13px}
+.mode-switch a{padding:7px 12px;color:var(--muted)}
+.mode-switch a[aria-current]{background:var(--light-grey);color:var(--ink);font-weight:600}
+.devnet-page .judge-devnet{max-width:920px;margin-top:18px}
+.judge-status{display:grid;gap:9px;margin-block:18px;grid-template-columns:repeat(2,minmax(0,1fr))}
+.judge-status dd,.judge-field{color:var(--muted);font-size:14px}
+.judge-status dt,.judge-run h3{font-weight:600}
+.judge-field{display:grid;gap:5px;max-width:450px;margin-block:12px}
+.judge-field input{padding:10px;border:1px solid var(--line)}
+.judge-form .button{margin-top:10px}
+.judge-run{margin-top:20px;padding-block:12px}
+.judge-timeline{display:grid;gap:6px;margin-top:8px}
+.wallet-path-title{margin-top:40px}
+@media(max-width:600px){.judge-status{grid-template-columns:1fr}}
+
+.stream-badge {
+  display: inline-block;
+  margin-inline: .4em;
+  padding: .15em .5em;
+  border-radius: 1em;
+  background: #e6e6e6;
+  color: #17221b;
+  font-size: .82em;
+}
+.stream-badge[data-healthy="true"] {
+  background: #d4f5dd;
+  color: #01472b;
+}
+
+.payment-draft { margin-top: 20px; }
+.payment-draft dl > div { transition: background-color .2s; }
+.payment-draft dl > div[data-draft-highlight="true"] { background-color: #d4f5dd; color: #01472b; }
+.draft-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.draft-edit { display: grid; gap: 8px; margin-top: 12px; }
+.draft-edit label { display: grid; gap: 4px; }
+.draft-edit input { min-width: 0; padding: 8px; }

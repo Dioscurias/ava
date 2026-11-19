@@ -51,7 +51,7 @@ export default function Home() {
       <div className="hero-stage wrap">
         <div className="hero-copy">
           <h1 id="hero-title">Money on<br/>your terms</h1>
-          <p className="hero-description">Tell Ava who to pay and when. Review the terms, then try the escrow flow with simulated USDC.</p>
+          <p className="hero-description">Tell Ava who to pay and when. Review the terms, then run the escrow in Simulation or with Solana Devnet test funds.</p>
           <div className="hero-actions">
             <Link className="button primary" href="/agent">Talk to Ava <ArrowUpRight size={16}/></Link>
           </div>
@@ -83,7 +83,7 @@ export default function Home() {
             </a>
           </figure>
         </Reveal>)}
-        <p className="walkthrough-note">Screenshots show a simulated payment. No funds move on-chain.</p>
+        <p className="walkthrough-note">These screenshots show Simulation mode. Devnet mode uses on-chain test USDC when the judge sponsor is ready.</p>
       </div>
 
     </section>

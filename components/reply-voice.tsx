@@ -101,7 +101,7 @@ export function ReplyVoice({text, elevenLabs, autoPlay}: {text:string; elevenLab
   return <>
     <button type="button" className="reply-voice" onClick={() => {autoStarted.current = true; void play();}} aria-label={status === "idle" ? "Listen to Ava’s reply" : "Stop spoken reply"}>
       {status === "idle" ? <Volume2 size={15}/> : <Square size={13}/>}
-      {status === "idle" ? "Listen" : status === "loading" ? "Loading voice…" : "Stop"}
+      {status === "idle" ? "Listen" : "Stop"}
     </button>
     {error && <small role="status">{error}</small>}
   </>;

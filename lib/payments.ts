@@ -3,12 +3,12 @@ export const demoInstruction = "Hold 250 USDC for Maya Chen until she delivers t
 export type Draft = {amount: number; recipient: string; condition: string};
 export type Status = "Holding" | "Conditions pending" | "Ready to release" | "Completed" | "Cancelled" | "Paused";
 export type Escrow = Draft & {id: string; status: Status; events: {label: string; at: string}[]};
-export type State = {escrows: Escrow[]; limit: number; paused: boolean; voice: boolean; allowHold: boolean; allowRelease: boolean};
+export type State = {escrows: Escrow[]; limit: number; paused: boolean; voice: boolean; microphone?: boolean; allowHold: boolean; allowRelease: boolean};
 export type Action = "release" | "cancel" | "add" | "pause" | "resume" | "verify";
 
 const seed = (label: string) => [{label, at: "2026-11-18T15:00:00.000Z"}];
 export const initial: State = {
-  limit: 250000, paused: false, voice: true, allowHold: true, allowRelease: true,
+  limit: 250000, paused: false, voice: true, microphone: true, allowHold: true, allowRelease: true,
   escrows: [
     {id:"AL-1042", amount:45000, recipient:"Northline Studio", condition:"Final brand assets approved", status:"Conditions pending", events:seed("450 USDC placed in escrow")},
     {id:"AL-1041", amount:12500, recipient:"Maya Chen", condition:"Signed invoice received", status:"Ready to release", events:seed("Signed invoice confirmed")},

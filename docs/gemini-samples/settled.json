@@ -1,0 +1,106 @@
+{
+  "id": "479989",
+  "title": "SOL price today at 2:15am EST",
+  "slug": "sol-price-today-at-215am-est",
+  "type": "binary",
+  "category": "Crypto",
+  "ticker": "SOL05M2611190715",
+  "status": "settled",
+  "createdAt": "2026-11-19T06:06:13.009Z",
+  "contracts": [
+    {
+      "id": "479989-1220016",
+      "label": "Up",
+      "description": {
+        "data": {},
+        "content": [
+          {
+            "data": {},
+            "marks": [],
+            "value": "If the price of Solana (SOL) is greater than or equal to the price specified in the title on November 19, 2026 at 2:15am ET, this market will resolve to Yes. Otherwise, it will resolve to No. If no eligible trade occurs during the contract window, this contract will resolve based on the most recent traded price prior. Outcome verified against the LS-LRRR-SOLNUSD index. View the [full rules](https://assets.gemini.com/predictions/terms_and_conditions/sol_9cceb1a1-4177-401a-82dc-097ad2676bc2.pdf).",
+            "nodeType": "text"
+          }
+        ],
+        "nodeType": "document"
+      },
+      "prices": {
+        "buy": {},
+        "sell": {}
+      },
+      "status": "settled",
+      "createdAt": "2026-11-19T06:06:13.009Z",
+      "termsAndConditionsUrl": "https://assets.gemini.com/predictions/terms_and_conditions/sol_9cceb1a1-4177-401a-82dc-097ad2676bc2.pdf",
+      "ticker": "UP",
+      "instrumentSymbol": "GEMI-SOL05M2611190715-UP",
+      "marketState": "closed",
+      "abbreviatedName": "Up",
+      "color": "#4CAF50",
+      "expiryDate": "2026-11-19T07:15:00.000Z",
+      "resolutionSide": "no",
+      "resolvedAt": "2026-11-19T07:15:05.837Z",
+      "effectiveDate": "2026-11-19T07:10:00.000Z",
+      "sortOrder": 0,
+      "strike": {
+        "type": "reference",
+        "value": "75.03834429833333",
+        "availableAt": "2026-11-19T07:10:00.000Z"
+      },
+      "source": "LS-LRRR-SOLNUSD",
+      "settlementValue": "74.88343879666667",
+      "isCombo": false,
+      "quantityIncrement": "0.01",
+      "quantityMinimum": "0.01",
+      "priceIncrement": "0.01",
+      "quoteAssetPrecision": 2,
+      "priceMinimum": "0.01"
+    }
+  ],
+  "effectiveDate": "2026-11-19T06:06:13.009Z",
+  "isLive": false,
+  "participants": [],
+  "description": "Interval SOL price prediction event expiring on November 19, 2026 at 2:15am ET",
+  "imageUrl": "https://assets.gemini.com/predictions/images/sol_0e1cf18e-eff3-4570-a348-210cd5434e8f.avif",
+  "series": "SOL05M",
+  "resolvedAt": "2026-11-19T07:15:05.837Z",
+  "volume": "0",
+  "volume24h": "0",
+  "tags": [
+    "Solana"
+  ],
+  "expiryDate": "2026-11-19T07:15:00.000Z",
+  "startTime": "2026-11-19T07:10:00.000Z",
+  "termsLink": "https://assets.gemini.com/predictions/terms_and_conditions/sol_9cceb1a1-4177-401a-82dc-097ad2676bc2.pdf",
+  "subcategory": {
+    "id": 35,
+    "slug": "crypto_solana",
+    "name": "Solana",
+    "path": [
+      "Crypto",
+      "Solana"
+    ]
+  },
+  "socialImageUrl": "https://assets.gemini.com/predictions/images/sol_9af62db6-2bf3-49e8-b401-4e7e93eeb520.png",
+  "featuredImageUrl": "https://assets.gemini.com/predictions/images/Top_10_-_SOL_1_02efc6d8-46a5-417e-9173-893daf5ca59e.avif",
+  "template": "crypto-up-down",
+  "eventTags": [
+    {
+      "id": 11,
+      "name": "Five Minute",
+      "slug": "five-minute"
+    },
+    {
+      "id": 19,
+      "name": "Up Down",
+      "slug": "up-down"
+    }
+  ],
+  "source": "LS-LRRR-SOLNUSD",
+  "settlement": {
+    "value": "74.88343879666667"
+  },
+  "sourceDetails": {
+    "agency": "lukka",
+    "index": "LS-LRRR-SOLNUSD"
+  },
+  "volumeDelta24hPct": "0"
+}

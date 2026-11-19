@@ -1,6 +1,8 @@
 "use client";
+import {StreamTimeline} from "./stream-timeline";
 
 import Link from "next/link";
+import {JudgeDevnet} from "./judge-devnet";
 import {useConnection, useWallet} from "@solana/wallet-adapter-react";
 import {useEffect, useRef, useState} from "react";
 import type {Transaction} from "@solana/web3.js";
@@ -55,7 +57,13 @@ export function DevnetWorkspace() {
     setSignature("");
     setMessage("Review and sign the Devnet transaction in your wallet.");
     try {
-      await confirmDevnetTransaction(connection, devnetProgram, makeTransaction(), owner, sendTransaction, setSignature);
+      await confirmDevnetTransaction(connection, devnetProgram, makeTransaction(), owner, sendTransaction, submitted => {
+        setSignature(submitted);
+        void fetch("/api/devnet/timeline", {
+          method: "POST", headers: {"content-type": "application/json"},
+          body: JSON.stringify({signature: submitted}), keepalive: true,
+        }).catch(() => {});
+      });
       setMessage(confirmation);
       return true;
     } catch (error) {
@@ -126,7 +134,9 @@ export function DevnetWorkspace() {
 
   return <main className="app-main detail-page devnet-page">
     <h1>Solana Devnet</h1>
-    <p>Use test USDC to fund and release an escrow on-chain. Each action requires a wallet signature.</p>
+    <JudgeDevnet/>
+    <h2 className="wallet-path-title">Use your own wallet</h2>
+    <p>Connect your wallet to sign each test USDC transaction yourself.</p>
     {!devnetProgram ? <p role="status">The on-chain escrow program is currently unavailable. <Link className="text-link" href="/agent">Open the simulated workspace</Link></p>
       : !owner ? <p>Connect a Solana wallet from the header. You’ll need Devnet SOL for fees and test USDC for payments.</p>
       : <>
@@ -171,6 +181,7 @@ export function DevnetWorkspace() {
             <strong>{formatBaseUnits(escrow.amount)} USDC · {describeEscrow(escrow)}</strong>
             <p className="wrap-address">Recipient: {escrow.recipient.toBase58()}</p><p>{escrow.condition}</p>
             <a className="text-link" href={explorer("address",escrow.key.toBase58())} target="_blank" rel="noreferrer">View on Solana Explorer</a>
+            <StreamTimeline escrow={escrow.key.toBase58()}/>
             <div className="action-list">
               {escrow.status === 1 && <button className="button glass" disabled={outstanding || paused} onClick={() => manage(escrow,"attest")}>Attest condition met</button>}
               {escrow.status === 2 && <button className="button primary" disabled={outstanding || paused || !releases} onClick={() => manage(escrow,"release")}>Release test USDC</button>}
@@ -185,6 +196,7 @@ export function DevnetWorkspace() {
             <strong>{formatBaseUnits(escrow.amount)} USDC · {describeEscrow(escrow)}</strong>
             <p>{escrow.condition}</p>
             <a className="text-link" href={explorer("address",escrow.key.toBase58())} target="_blank" rel="noreferrer">View on Solana Explorer</a>
+            <StreamTimeline escrow={escrow.key.toBase58()}/>
           </article>)}
         </section>
       </>}
