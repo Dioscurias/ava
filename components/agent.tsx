@@ -11,11 +11,15 @@ import {ArrowRight, ArrowUp, AudioLines, ChevronDown, LockKeyhole, Mic, ShieldCh
 import {active, addEscrow, committed, demoInstruction, guard, money, parsePayment, type Draft} from "../lib/payments";
 import {StatusBadge, useWorkspace} from "./workspace";
 
+type RecognitionResult = ArrayLike<{transcript: string}> & {isFinal: boolean};
+
 type Recognition = {
   lang: string;
+  continuous: boolean;
+  interimResults: boolean;
   start: () => void;
   stop: () => void;
-  onresult: ((event: {results: ArrayLike<ArrayLike<{transcript: string}>>}) => void) | null;
+  onresult: ((event: {results: ArrayLike<RecognitionResult>}) => void) | null;
   onend: (() => void) | null;
   onerror: (() => void) | null;
 };
@@ -124,22 +128,37 @@ export function Agent({demo, intro = false, elevenLabs = false}: {demo: boolean;
     const recognition = new Engine();
     voiceRef.current = recognition;
     recognition.lang = "en-US";
-    let transcript = "";
-    recognition.onresult = event => {
-      transcript = event.results[0]?.[0]?.transcript ?? "";
-    };
-    recognition.onend = () => {
-      setListening(false);
+    recognition.continuous = false;
+    recognition.interimResults = false;
+
+    function finish() {
+      if (voiceRef.current !== recognition) return false;
       voiceRef.current = null;
-      if (transcript) send(transcript);
-    };
-    recognition.onerror = () => {
-      transcript = "";
       setListening(false);
-      setNotice("Voice input stopped. Check your microphone permissions or type your instruction.");
+      return true;
+    }
+
+    recognition.onresult = event => {
+      const instruction = Array.from(event.results)
+        .filter(result => result.isFinal)
+        .map(result => result[0]?.transcript ?? "")
+        .join(" ").trim();
+      if (!instruction || !finish()) return;
+      recognition.stop();
+      send(instruction);
+    };
+    recognition.onend = () => {finish();};
+    recognition.onerror = () => {
+      if (finish()) setNotice("Voice input stopped. Check your microphone permissions or type your instruction.");
     };
     setNotice("");
-    try {recognition.start(); setListening(true);} catch {setNotice("Could not start voice input.");}
+    try {
+      recognition.start();
+      setListening(true);
+    } catch {
+      finish();
+      setNotice("Could not start voice input.");
+    }
   }
 
   const suggestions = <div className="suggestions">{prompts.map(prompt => <button key={prompt.label} onClick={() => {
