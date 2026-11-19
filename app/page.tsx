@@ -8,6 +8,7 @@ import {VoiceOrb} from "../components/voice-orb";
 
 const walkthrough = [
   {
+    tone: "instruction",
     title: "Tell Ava what to do",
     body: "Type or dictate the amount, recipient, and what needs to happen before release.",
     image: "/ava-instruction.jpg",
@@ -17,6 +18,7 @@ const walkthrough = [
     alt: "Ava’s opening screen with the orb and a 250 USDC instruction typed into the command bar",
   },
   {
+    tone: "review",
     title: "Review the proposed payment",
     body: "Check the amount, recipient, and condition before confirming the escrow.",
     image: "/ava-review.jpg",
@@ -26,6 +28,7 @@ const walkthrough = [
     alt: "Payment review showing 250 USDC for Maya Chen, with delivery of the final files as the release condition",
   },
   {
+    tone: "timeline",
     title: "Follow the money",
     body: "The timeline records when funds were held, when the condition was confirmed, and when they were released.",
     image: "/ava-timeline.jpg",
@@ -69,7 +72,7 @@ export default function Home() {
       </Reveal>
       <div className="wrap walkthrough">
         {walkthrough.map(step => <Reveal key={step.image}>
-          <figure className="walkthrough-step">
+          <figure className={`walkthrough-step walkthrough-${step.tone}`}>
             <figcaption>
               <h3>{step.title}</h3>
               <p>{step.body}</p>

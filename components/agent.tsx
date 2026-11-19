@@ -2,6 +2,7 @@
 import Link from "next/link";
 import Image from "next/image";
 import {useRouter} from "next/navigation";
+import {ReplyVoice, stopReplyVoice} from "./reply-voice";
 import {VoiceOrb} from "./voice-orb";
 import {useWallet} from "@solana/wallet-adapter-react";
 import {useCallback, useEffect, useLayoutEffect, useRef, useState} from "react";
@@ -26,7 +27,7 @@ const prompts = [
   {label:"Get receiving details", value:"How do I receive USDC?"},
 ];
 
-export function Agent({demo, intro = false}: {demo: boolean; intro?: boolean}) {
+export function Agent({demo, intro = false, elevenLabs = false}: {demo: boolean; intro?: boolean; elevenLabs?: boolean}) {
   const router = useRouter();
   const {state, setState, ready, openingPrompt} = useWorkspace();
   const {publicKey} = useWallet();
@@ -105,6 +106,7 @@ export function Agent({demo, intro = false}: {demo: boolean; intro?: boolean}) {
     const browser = window as Window & {SpeechRecognition?: new () => Recognition; webkitSpeechRecognition?: new () => Recognition};
     const Engine = browser.SpeechRecognition ?? browser.webkitSpeechRecognition;
     if (!Engine) {setNotice("Voice input is unavailable in this browser. You can still type an instruction."); return;}
+    stopReplyVoice();
     const recognition = new Engine();
     voiceRef.current = recognition;
     recognition.lang = "en-US";
@@ -126,7 +128,7 @@ export function Agent({demo, intro = false}: {demo: boolean; intro?: boolean}) {
   const composer = (
       <div className="composer-wrap">
         {notice && <p className="notice" role="status">{notice}</p>}
-        <form className="composer" onSubmit={submit}>{!intro && <VoiceOrb listening={listening}/>}<input ref={inputRef} value={input} onChange={e => setInput(e.target.value)} maxLength={600} aria-label="Payment instruction" placeholder="Tell Ava what to do…"/>{state.voice && <button className="icon-button" type="button" aria-label={listening ? "Stop dictation" : "Start dictation"} aria-pressed={listening} onClick={dictate}>{listening ? <AudioLines size={20}/> : <Mic size={19}/>}</button>}<button type="submit" className="send" aria-label="Send instruction" disabled={!input.trim() || leaving}><ArrowUp size={20}/></button></form>
+        <form className="composer" onSubmit={submit}>{!intro && <VoiceOrb listening={listening}/>}<input ref={inputRef} value={input} onChange={e => setInput(e.target.value)} maxLength={600} aria-label="Payment instruction" placeholder="Tell Ava what to do…"/>{state.voice && <button className="icon-button dictation-control" type="button" title="Dictate an instruction" aria-label={listening ? "Stop dictation" : "Start dictation"} aria-pressed={listening} onClick={dictate}>{listening ? <AudioLines size={20}/> : <Mic size={19}/>}<span>{listening ? "Stop" : "Speak"}</span></button>}<button type="submit" className="send" aria-label="Send instruction" disabled={!input.trim() || leaving}><ArrowUp size={20}/></button></form>
         <p className="composer-caption" role="status">{listening ? "Listening…" : ""}</p>
       </div>
   );
@@ -149,7 +151,7 @@ export function Agent({demo, intro = false}: {demo: boolean; intro?: boolean}) {
       <div className="agent-top"><div><h1 ref={headingRef} tabIndex={-1}>Ava agent</h1></div></div>
       <div className="conversation">
         {turns.length === 0 && <div className="welcome"><h2>What should move?</h2><p>Tell Ava who to pay and when.</p>{suggestions}</div>}
-        <div className="turns" aria-live="polite">{turns.map(turn => <motion.article key={turn.id} initial={reduced || (arriving && turn === turns[0]) ? false : {opacity:0, y:8}} animate={{opacity:1,y:0}} className="turn"><p className="user-turn">{turn.prompt}</p><div className="agent-turn"><Image className="reply-orb" src="/ava-reply-orb.webp" alt="" width={20} height={20} unoptimized/><div><strong>Ava</strong><p>{turn.reply}</p>{turn.draft && <div className="draft"><h3>{money(turn.draft.amount)} <small>USDC</small></h3><dl><div><dt>Recipient</dt><dd>{turn.draft.recipient}</dd></div><div><dt>Release condition</dt><dd>{turn.draft.condition}</dd></div></dl>{turn.escrow ? <Link className="text-link" href={`/payments/${turn.escrow}`}>View demo escrow <ArrowRight size={15}/></Link> : <button className="button primary" disabled={!ready} onClick={() => confirm(turn)}>Confirm demo escrow <LockKeyhole size={14}/></button>}</div>}</div></div></motion.article>)}</div>
+        <div className="turns" aria-live="polite">{turns.map(turn => <motion.article key={turn.id} initial={reduced || (arriving && turn === turns[0]) ? false : {opacity:0, y:8}} animate={{opacity:1,y:0}} className="turn"><p className="user-turn">{turn.prompt}</p><div className="agent-turn"><Image className="reply-orb" src="/ava-reply-orb.webp" alt="" width={20} height={20} unoptimized/><div><div className="reply-heading"><strong>Ava</strong>{state.voice && <ReplyVoice text={turn.reply} elevenLabs={elevenLabs}/>}</div><p>{turn.reply}</p>{turn.draft && <div className="draft"><h3>{money(turn.draft.amount)} <small>USDC</small></h3><dl><div><dt>Recipient</dt><dd>{turn.draft.recipient}</dd></div><div><dt>Release condition</dt><dd>{turn.draft.condition}</dd></div></dl>{turn.escrow ? <Link className="text-link" href={`/payments/${turn.escrow}`}>View demo escrow <ArrowRight size={15}/></Link> : <button className="button primary" disabled={!ready} onClick={() => confirm(turn)}>Confirm demo escrow <LockKeyhole size={14}/></button>}</div>}</div></div></motion.article>)}</div>
         <div ref={conversationEnd}/>
       </div>
       {composer}

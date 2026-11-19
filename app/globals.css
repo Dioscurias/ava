@@ -52,8 +52,11 @@ a,button,summary{transition:background .2s,color .2s,border-color .2s}
 .instruction-content{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:clamp(24px,6vw,90px);align-items:end}
 .instruction-content p{max-width:360px;margin-top:18px;color:var(--muted);font-size:clamp(16px,1.7vw,20px);line-height:1.5}
 .example-instruction{max-width:550px;color:var(--forest);font-size:clamp(24px,3.3vw,48px);line-height:1.18;font-weight:430}
-.walkthrough{display:grid;gap:clamp(45px,8vw,116px);margin-top:clamp(50px,7vw,102px)}
-.walkthrough-step{display:grid;grid-template-columns:minmax(190px,1fr) minmax(0,2.65fr);gap:clamp(22px,4.5vw,72px);align-items:center;margin:0}
+.walkthrough{display:grid;gap:clamp(24px,4vw,60px);margin-top:clamp(46px,6vw,92px)}
+.walkthrough-step{display:grid;grid-template-columns:minmax(190px,1fr) minmax(0,2.65fr);gap:clamp(22px,4.5vw,72px);align-items:center;margin:0;padding:clamp(18px,4vw,56px)}
+.walkthrough-instruction{background:#dcebe0}
+.walkthrough-timeline{background:#e1e9df}
+.walkthrough-review{background:#f7f8f5}
 .walkthrough>div:nth-child(2) .walkthrough-step{grid-template-columns:minmax(0,2.65fr) minmax(190px,1fr)}
 .walkthrough>div:nth-child(2) figcaption{grid-column:2;grid-row:1}
 .walkthrough>div:nth-child(2) .walkthrough-image{grid-column:1;grid-row:1}
@@ -250,3 +253,10 @@ button.panel-heading:hover{background:var(--light-grey)}
 .devnet-escrow{padding-block:8px}
 .devnet-notice{position:sticky;bottom:0;margin-top:28px;padding:12px 0;background:var(--bg)}
 .wrap-address{overflow-wrap:anywhere}
+
+
+.dictation-control{display:inline-flex;width:auto;gap:6px;padding-inline:8px;font-size:12px;font-weight:550}
+.reply-heading{display:flex;align-items:center;flex-wrap:wrap;gap:10px}
+.reply-voice{display:inline-flex;align-items:center;gap:5px;color:var(--forest);font-size:12px;min-height:28px}
+.reply-voice:hover{text-decoration:underline}
+@media(max-width:360px){.dictation-control span{display:none}}
