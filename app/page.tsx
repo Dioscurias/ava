@@ -11,21 +11,27 @@ const walkthrough = [
     title: "Tell Ava what to do",
     body: "Type or dictate the amount, recipient, and what needs to happen before release.",
     image: "/ava-instruction.jpg",
-    height: 801,
+    detail: "/ava-instruction-detail.webp",
+    width: 908,
+    height: 718,
     alt: "Ava’s opening screen with the orb and a 250 USDC instruction typed into the command bar",
   },
   {
     title: "Review the proposed payment",
     body: "Check the amount, recipient, and condition before confirming the escrow.",
     image: "/ava-review.jpg",
-    height: 720,
+    detail: "/ava-review-detail.webp",
+    width: 930,
+    height: 375,
     alt: "Payment review showing 250 USDC for Maya Chen, with delivery of the final files as the release condition",
   },
   {
     title: "Follow the money",
     body: "The timeline records when funds were held, when the condition was confirmed, and when they were released.",
     image: "/ava-timeline.jpg",
-    height: 720,
+    detail: "/ava-timeline-detail.webp",
+    width: 1088,
+    height: 405,
     alt: "Completed escrow timeline showing the hold, condition confirmation, and release",
   },
 ];
@@ -54,9 +60,11 @@ export default function Home() {
     <section id="how" className="landing-section instruction-section">
       <Reveal>
         <div className="wrap instruction-content">
-          <h2>Start with a sentence</h2>
+          <div>
+            <h2>Start with a sentence</h2>
+            <p>See how Ava turns an instruction into a payment you can review and release.</p>
+          </div>
           <blockquote className="example-instruction">“{demoInstruction}”</blockquote>
-          <p>Ava drafts the amount, recipient, and release condition for you to review.</p>
         </div>
       </Reveal>
       <div className="wrap walkthrough">
@@ -67,7 +75,8 @@ export default function Home() {
               <p>{step.body}</p>
             </figcaption>
             <a className="walkthrough-image" href={step.image} aria-label={`Open full-size screenshot: ${step.title}`}>
-              <Image src={step.image} width={1280} height={step.height} sizes="(max-width: 850px) 94vw, 66vw" alt={step.alt}/>
+              <Image src={step.detail} width={step.width} height={step.height} unoptimized alt={step.alt}/>
+              <ArrowUpRight className="walkthrough-expand" size={18} aria-hidden="true"/>
             </a>
           </figure>
         </Reveal>)}
@@ -78,12 +87,14 @@ export default function Home() {
 
     <section id="safety" className="landing-section safety-section">
       <Reveal>
-        <div className="wrap editorial-section">
+        <div className="wrap safety-content">
           <h2>You set the boundaries</h2>
-          <div className="safety-copy">
-            <p>Set a spending limit, choose which actions Ava can take, or pause the agent at any time.</p>
-            <Link href="/settings" className="text-link">Explore permissions <ArrowUpRight size={15}/></Link>
-          </div>
+          <ul className="safety-options" role="list">
+            <li><h3>Set a spending limit</h3><p>Decide how much Ava can commit across payments.</p></li>
+            <li><h3>Choose what Ava can do</h3><p>Control whether Ava can fund escrows or release payments.</p></li>
+            <li><h3>Pause anytime</h3><p>Block new funding and releases while you review existing escrows.</p></li>
+          </ul>
+          <Link href="/settings" className="text-link">Explore permissions <ArrowUpRight size={15}/></Link>
         </div>
       </Reveal>
     </section>
