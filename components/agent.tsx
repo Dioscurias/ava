@@ -46,7 +46,14 @@ export function Agent({demo, intro = false, elevenLabs = false}: {demo: boolean;
   const escrows = state.escrows.filter(active);
   const remaining = Math.max(0, state.limit - committed(state));
   useEffect(() => {if (turns.length > 1) conversationEnd.current?.scrollIntoView({behavior: reduced ? "instant" : "smooth", block:"nearest"});}, [turns, reduced]);
-  useEffect(() => () => {voiceRef.current?.stop();}, []);
+  useEffect(() => () => {
+    if (voiceRef.current) {
+      voiceRef.current.onend = null;
+      voiceRef.current.onresult = null;
+      voiceRef.current.onerror = null;
+      voiceRef.current.stop();
+    }
+  }, []);
 
   const addTurn = useCallback((prompt: string) => {
     const draft = parsePayment(prompt);
@@ -87,6 +94,13 @@ export function Agent({demo, intro = false, elevenLabs = false}: {demo: boolean;
 
   function submit(event: React.FormEvent) {
     event.preventDefault();
+    if (voiceRef.current) {
+      voiceRef.current.onresult = null;
+      voiceRef.current.onend = null;
+      voiceRef.current.stop();
+      voiceRef.current = null;
+      setListening(false);
+    }
     send(input);
   }
 
@@ -110,13 +124,20 @@ export function Agent({demo, intro = false, elevenLabs = false}: {demo: boolean;
     const recognition = new Engine();
     voiceRef.current = recognition;
     recognition.lang = "en-US";
+    let transcript = "";
     recognition.onresult = event => {
-      const transcript = event.results[0][0].transcript;
-      if (intro) send(transcript);
-      else {setInput(transcript); inputRef.current?.focus();}
+      transcript = event.results[0]?.[0]?.transcript ?? "";
     };
-    recognition.onend = () => {setListening(false); voiceRef.current = null;};
-    recognition.onerror = () => {setListening(false); setNotice("Voice input stopped. Check your microphone permissions or type your instruction.");};
+    recognition.onend = () => {
+      setListening(false);
+      voiceRef.current = null;
+      if (transcript) send(transcript);
+    };
+    recognition.onerror = () => {
+      transcript = "";
+      setListening(false);
+      setNotice("Voice input stopped. Check your microphone permissions or type your instruction.");
+    };
     setNotice("");
     try {recognition.start(); setListening(true);} catch {setNotice("Could not start voice input.");}
   }
@@ -151,7 +172,7 @@ export function Agent({demo, intro = false, elevenLabs = false}: {demo: boolean;
       <div className="agent-top"><div><h1 ref={headingRef} tabIndex={-1}>Ava agent</h1></div></div>
       <div className="conversation">
         {turns.length === 0 && <div className="welcome"><h2>What should move?</h2><p>Tell Ava who to pay and when.</p>{suggestions}</div>}
-        <div className="turns" aria-live="polite">{turns.map(turn => <motion.article key={turn.id} initial={reduced || (arriving && turn === turns[0]) ? false : {opacity:0, y:8}} animate={{opacity:1,y:0}} className="turn"><p className="user-turn">{turn.prompt}</p><div className="agent-turn"><Image className="reply-orb" src="/ava-reply-orb.webp" alt="" width={20} height={20} unoptimized/><div><div className="reply-heading"><strong>Ava</strong>{state.voice && <ReplyVoice text={turn.draft ? `I’ve drafted ${money(turn.draft.amount)} U.S.D.C. for ${turn.draft.recipient}. Release condition: ${turn.draft.condition}. Review the terms before placing funds in escrow.` : turn.reply} elevenLabs={elevenLabs}/>}</div><p>{turn.reply}</p>{turn.draft && <div className="draft"><h3>{money(turn.draft.amount)} <small>USDC</small></h3><dl><div><dt>Recipient</dt><dd>{turn.draft.recipient}</dd></div><div><dt>Release condition</dt><dd>{turn.draft.condition}</dd></div></dl>{turn.escrow ? <Link className="text-link" href={`/payments/${turn.escrow}`}>View demo escrow <ArrowRight size={15}/></Link> : <button className="button primary" disabled={!ready} onClick={() => confirm(turn)}>Confirm demo escrow <LockKeyhole size={14}/></button>}</div>}</div></div></motion.article>)}</div>
+        <div className="turns" aria-live="polite">{turns.map(turn => <motion.article key={turn.id} initial={reduced || (arriving && turn === turns[0]) ? false : {opacity:0, y:8}} animate={{opacity:1,y:0}} className="turn"><p className="user-turn">{turn.prompt}</p><div className="agent-turn"><Image className="reply-orb" src="/ava-reply-orb.webp" alt="" width={20} height={20} unoptimized/><div><div className="reply-heading"><strong>Ava</strong>{state.voice && <ReplyVoice text={turn.draft ? `I’ve drafted ${money(turn.draft.amount)} U.S.D.C. for ${turn.draft.recipient}. Release condition: ${turn.draft.condition}. Review the terms before placing funds in escrow.` : turn.reply} elevenLabs={elevenLabs} autoPlay={!listening && turn.id === turns.at(-1)?.id}/>}</div><p>{turn.reply}</p>{turn.draft && <div className="draft"><h3>{money(turn.draft.amount)} <small>USDC</small></h3><dl><div><dt>Recipient</dt><dd>{turn.draft.recipient}</dd></div><div><dt>Release condition</dt><dd>{turn.draft.condition}</dd></div></dl>{turn.escrow ? <Link className="text-link" href={`/payments/${turn.escrow}`}>View demo escrow <ArrowRight size={15}/></Link> : <button className="button primary" disabled={!ready} onClick={() => confirm(turn)}>Confirm demo escrow <LockKeyhole size={14}/></button>}</div>}</div></div></motion.article>)}</div>
         <div ref={conversationEnd}/>
       </div>
       {composer}

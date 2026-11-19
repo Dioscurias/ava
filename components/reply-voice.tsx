@@ -1,20 +1,22 @@
 "use client";
 
 import {Square, Volume2} from "lucide-react";
-import {useEffect, useRef, useState} from "react";
+import {useCallback, useEffect, useRef, useState} from "react";
 
 type Playback = {stop: () => void};
 const currentPlayback = {stop: null as (() => void) | null};
 export function stopReplyVoice() {currentPlayback.stop?.();}
 
-export function ReplyVoice({text, elevenLabs}: {text:string; elevenLabs:boolean}) {
+export function ReplyVoice({text, elevenLabs, autoPlay}: {text:string; elevenLabs:boolean; autoPlay:boolean}) {
   const active = useRef<Playback | null>(null);
+  const autoStarted = useRef(false);
+  const cachedClip = useRef<Blob | null>(null);
   const [status, setStatus] = useState<"idle" | "loading" | "playing">("idle");
   const [error, setError] = useState("");
 
   useEffect(() => () => {active.current?.stop();}, []);
 
-  async function play() {
+  const play = useCallback(async () => {
     if (active.current) {active.current.stop();return;}
     currentPlayback.stop?.();
     setError("");
@@ -38,24 +40,33 @@ export function ReplyVoice({text, elevenLabs}: {text:string; elevenLabs:boolean}
 
     if (elevenLabs) {
       try {
-        const response = await fetch("/api/voice", {
-          method:"POST",
-          headers:{"Content-Type":"application/json"},
-          body:JSON.stringify({text:text.slice(0,600)}),
-          signal:controller.signal,
-        });
-        if (!response.ok) throw Error("Voice unavailable");
-        const clip = await response.blob();
+        let clip = cachedClip.current;
+        if (!clip) {
+          const response = await fetch("/api/voice", {
+            method:"POST",
+            headers:{"Content-Type":"application/json"},
+            body:JSON.stringify({text:text.slice(0,600)}),
+            signal:controller.signal,
+          });
+          if (!response.ok) throw Error("Voice unavailable");
+          clip = await response.blob();
+          cachedClip.current = clip;
+        }
         if (controller.signal.aborted) return;
         url = URL.createObjectURL(clip);
         audio = new Audio(url);
-        await audio.play();
-        if (controller.signal.aborted) return;
         audio.onended = stop;
         audio.onerror = () => {stop();setError("Could not play this reply.");};
+        await audio.play();
+        if (controller.signal.aborted) return;
         setStatus("playing");
         return;
-      } catch {
+      } catch (error) {
+        if (error instanceof DOMException && error.name === "NotAllowedError") {
+          stop();
+          setError("Tap Listen to play this reply.");
+          return;
+        }
         audio?.pause();
         if (url) {URL.revokeObjectURL(url);url = undefined;}
         if (controller.signal.aborted) return;
@@ -76,10 +87,19 @@ export function ReplyVoice({text, elevenLabs}: {text:string; elevenLabs:boolean}
     };
     window.speechSynthesis.speak(utterance);
     setStatus("playing");
-  }
+  }, [elevenLabs, text]);
+
+  useEffect(() => {
+    if (!autoPlay || autoStarted.current) return;
+    const frame = window.setTimeout(() => {
+      autoStarted.current = true;
+      if (!active.current) void play();
+    }, 0);
+    return () => window.clearTimeout(frame);
+  }, [autoPlay, play]);
 
   return <>
-    <button type="button" className="reply-voice" onClick={() => void play()} aria-label={status === "idle" ? "Listen to Ava’s reply" : "Stop spoken reply"}>
+    <button type="button" className="reply-voice" onClick={() => {autoStarted.current = true; void play();}} aria-label={status === "idle" ? "Listen to Ava’s reply" : "Stop spoken reply"}>
       {status === "idle" ? <Volume2 size={15}/> : <Square size={13}/>}
       {status === "idle" ? "Listen" : status === "loading" ? "Loading voice…" : "Stop"}
     </button>
