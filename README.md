@@ -49,3 +49,12 @@ AVA_TEST_TOKEN_PROGRAM=/tmp/ava-spl-token.so AVA_TEST_ATA_PROGRAM=/tmp/ava-spl-a
 The test starts its own validator and provides a local test mint fixture. It measures SPL token balances across funding, release, and cancellation, and verifies that unauthorized state transitions fail.
 
 Judge mode and deployment instructions are in [docs/DEPLOYED.md](docs/DEPLOYED.md). The **Simulation / Devnet** switch keeps the browser-only walkthrough and the sponsored test-token flow separate.
+
+### Grok planning
+
+Set the server-only `XAI_API_KEY` in `.env.local` or in the Vercel environment and
+redeploy. `XAI_MODEL` optionally overrides `grok-4-1-fast-non-reasoning`.
+Ava uses Grok when the local parser and workspace commands cannot handle a message.
+The current draft and up to four recent exchanges go to xAI on those turns.
+Grok can propose edits or ask questions. Escrow confirmation remains an explicit
+action in Ava. Set a spend limit on the provider key before enabling public traffic.

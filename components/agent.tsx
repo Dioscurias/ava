@@ -26,7 +26,7 @@ type Recognition = {
   onend: (() => void) | null;
   onerror: (() => void) | null;
 };
-type Turn = {id: string; prompt: string; reply: string};
+type Turn = {id: string; prompt: string; reply: string; pending?: boolean};
 type Market = {condition: string; choices?: MarketChoice[]; selected?: MarketChoice; notice: string};
 const btcPrompt = "Hold 5 USDC for Dave until the next BTC 5-minute round settles up";
 const prompts = [
@@ -45,6 +45,7 @@ export function Agent({demo, intro = false, elevenLabs = false}: {demo: boolean;
   const [arriving, setArriving] = useState(false);
   const [input, setInput] = useState(demo ? prompts[0].value : "");
   const [turns, setTurns] = useState<Turn[]>([]);
+  const turnRevision = useRef(0);
   const [memory, setMemory] = useState(emptyDraft);
   const memoryRef = useRef(emptyDraft);
   const [highlighted, setHighlighted] = useState<DraftField[]>([]);
@@ -125,6 +126,9 @@ export function Agent({demo, intro = false, elevenLabs = false}: {demo: boolean;
   }, [applyDraft, ready, setState, state]);
 
   const addTurn = useCallback((prompt: string) => {
+    const revision = ++turnRevision.current;
+    const id = crypto.randomUUID();
+    let recognized = true;
     let reply = "For a payment, tell me the amount and recipient. You can also tell me what needs to happen before release.";
     const isConfirmation = /^confirm(?: (?:it|(?:the )?(?:draft|payment|escrow)))?[.!?]*$/i.test(prompt.trim());
     const repair = isConfirmation ? null : draftTurn(memoryRef.current, prompt);
@@ -136,10 +140,38 @@ export function Agent({demo, intro = false, elevenLabs = false}: {demo: boolean;
     else if (/pending|status|escrows|history|activity/i.test(prompt)) reply = escrows.length ? escrows.map(e => `${e.recipient} · ${money(e.amount)} USDC · ${e.status}. ${e.condition}.`).join("\n") : "There are no open escrows.";
     else if (/limit|spend|allow|permission/i.test(prompt)) reply = `You have ${money(remaining)} USDC available under your ${money(state.limit)} USDC workspace limit. Funding is ${state.allowHold ? "enabled" : "disabled"}, and releases are ${state.allowRelease ? "enabled" : "disabled"}.`;
     else if (/receiv|deposit/i.test(prompt)) reply = publicKey ? `Connected Solana address: ${publicKey.toBase58()}. Incoming transfers are simulated in this workspace.` : "Connect a Solana wallet from the workspace header to see its public address. Incoming transfers are simulated in this workspace.";
-    setTurns(previous => [...previous, {id: crypto.randomUUID(), prompt, reply}]);
+    else recognized = false;
+    setTurns(previous => [...previous, {id, prompt, reply: recognized ? reply : "Thinking…", pending: !recognized}]);
+    if (!recognized) {
+      const current = memoryRef.current;
+      const finish = (answer: string) => setTurns(previous =>
+        previous.map(turn => turn.id === id ? {...turn, pending: false, reply: answer} : turn));
+      void fetch("/api/plan", {
+        method: "POST",
+        headers: {"content-type": "application/json"},
+        body: JSON.stringify({
+          prompt,
+          draft: current.current.status === "confirmed" ? null : current.current,
+          history: turns.filter(turn => !turn.pending).slice(-4).map(({prompt, reply}) => ({prompt, reply: reply.slice(0, 400)})),
+        }),
+      }).then(async response => {
+        if (response.status === 503) {finish(reply); return;}
+        if (!response.ok) throw new Error("Planner failed");
+        const plan: {reply: string; patch?: Partial<Draft>} = await response.json();
+        if (!plan.patch) {finish(plan.reply); return;}
+        if (revision !== turnRevision.current || current !== memoryRef.current) {
+          finish("The draft changed while I was working. Repeat the edit if you still want it.");
+          return;
+        }
+        if (current.choices) {finish("Choose a recipient before changing the draft."); return;}
+        const next = editDraft(current, plan.patch);
+        applyDraft(next);
+        finish(next.choices ? "Which recipient should I use?" : nextDraftQuestion(next.current));
+      }).catch(() => finish("I couldn’t reach the planner. If this is a payment, try stating the amount and recipient directly."));
+    }
     setInput("");
     setNotice("");
-  }, [applyDraft, confirm, escrows, publicKey, remaining, state.allowHold, state.allowRelease, state.limit]);
+  }, [applyDraft, confirm, escrows, publicKey, remaining, state.allowHold, state.allowRelease, state.limit, turns]);
 
   useEffect(() => {if (intro) router.prefetch("/agent/chat");}, [intro, router]);
 
@@ -274,7 +306,7 @@ export function Agent({demo, intro = false, elevenLabs = false}: {demo: boolean;
         <div className="turns" aria-live="polite">{turns.map(turn => <motion.article key={turn.id} initial={reduced || (arriving && turn === turns[0]) ? false : {opacity:0, y:8}} animate={{opacity:1,y:0}} className="turn">
           <p className="user-turn">{turn.prompt}</p>
           <div className="agent-turn"><Image className="reply-orb" src="/ava-reply-orb.webp" alt="" width={20} height={20} unoptimized/>
-            <div><div className="reply-heading"><strong>Ava</strong>{state.voice && <ReplyVoice text={turn.reply} elevenLabs={elevenLabs} autoPlay={!listening && turn.id === turns.at(-1)?.id}/>}</div><p>{turn.reply}</p></div>
+            <div><div className="reply-heading"><strong>Ava</strong>{state.voice && !turn.pending && <ReplyVoice text={turn.reply} elevenLabs={elevenLabs} autoPlay={!listening && turn.id === turns.at(-1)?.id}/>}</div><p>{turn.reply}</p></div>
           </div>
         </motion.article>)}</div>
         <PaymentDraft memory={memory} highlighted={highlighted} escrow={escrow} canConfirm={ready && Boolean(readyDraft(memory))}
