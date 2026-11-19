@@ -1,6 +1,6 @@
 export async function POST(request: Request) {
-  const apiKey = process.env.ELEVENLABS_API_KEY;
-  const voiceId = process.env.ELEVENLABS_VOICE_ID;
+  const apiKey = process.env.ELEVENLABS_API_KEY?.trim();
+  const voiceId = process.env.ELEVENLABS_VOICE_ID?.trim();
   if (!apiKey || !voiceId) return new Response(null, {status:503});
 
   let text: unknown;
@@ -18,7 +18,14 @@ export async function POST(request: Request) {
         signal:AbortSignal.any([request.signal,AbortSignal.timeout(8_000)]),
       },
     );
-    if (!upstream.ok || !upstream.body) return new Response(null,{status:502});
+    if (!upstream.ok || !upstream.body) {
+      const error = await upstream.json().catch(() => null);
+      const code = error?.detail?.status;
+      return Response.json({
+        providerStatus: upstream.status,
+        providerCode: typeof code === "string" && /^[a-z_]{1,50}$/.test(code) ? code : undefined,
+      }, {status:502});
+    }
     return new Response(upstream.body,{headers:{"Content-Type":"audio/mpeg","Cache-Control":"no-store"}});
   } catch {
     return new Response(null,{status:502});
