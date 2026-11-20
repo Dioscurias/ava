@@ -30,7 +30,9 @@ export function unlockReplyVoice() {
   }
 }
 
-export function ReplyVoice({text, autoPlay}: {text:string; autoPlay:boolean}) {
+export function ReplyVoice({text, autoPlay, onFinished, listening = false}: {text:string; autoPlay:boolean; onFinished?: () => void; listening?: boolean}) {
+  const finished = useRef(onFinished);
+  useEffect(() => {finished.current = onFinished;}, [onFinished]);
   const active = useRef<Playback | null>(null);
   const autoStarted = useRef(false);
   const cachedClip = useRef<Blob | null>(null);
@@ -55,6 +57,7 @@ export function ReplyVoice({text, autoPlay}: {text:string; autoPlay:boolean}) {
       if (source) {source.onended = null; source.stop(); source.disconnect();}
       if (mediaUrl && media) {
         media.onended = null;
+        media.onerror = null;
         media.pause();
         media.removeAttribute("src");
         URL.revokeObjectURL(mediaUrl);
@@ -62,6 +65,7 @@ export function ReplyVoice({text, autoPlay}: {text:string; autoPlay:boolean}) {
       if (utterance) window.speechSynthesis.cancel();
       setStatus("idle");
     };
+    const complete = () => {stop(); finished.current?.();};
     active.current = {stop};
     currentPlayback.stop = stop;
     setStatus("loading");
@@ -99,7 +103,7 @@ export function ReplyVoice({text, autoPlay}: {text:string; autoPlay:boolean}) {
             node.connect(player.destination);
             node.start();
             source = node;
-            node.onended = stop;
+            node.onended = complete;
             setStatus("playing");
             return;
           }
@@ -112,32 +116,33 @@ export function ReplyVoice({text, autoPlay}: {text:string; autoPlay:boolean}) {
         media ??= new Audio();
         mediaUrl = URL.createObjectURL(clip);
         media.src = mediaUrl;
-        media.onended = stop;
+        media.onended = complete;
         await media.play();
         if (controller.signal.aborted) return;
         mediaUnlocked = true;
+        media.onerror = () => {complete(); setError("Couldn’t play the spoken reply.");};
         setStatus("playing");
       } catch (error) {
         if (controller.signal.aborted) return;
         const blocked = error instanceof DOMException && error.name === "NotAllowedError";
         if (blocked) mediaUnlocked = false;
-        stop();
+        complete();
         setError(blocked ? "Tap Listen to enable audio." : "Couldn’t play the spoken reply.");
       }
       return;
     }
 
     if (!("speechSynthesis" in window) || !("SpeechSynthesisUtterance" in window)) {
-      stop();
+      complete();
       setError("Spoken replies are unavailable on this device.");
       return;
     }
     utterance = new SpeechSynthesisUtterance(text);
     utterance.lang = "en-US";
     utterance.rate = .95;
-    utterance.onend = stop;
+    utterance.onend = complete;
     utterance.onerror = () => {
-      if (!controller.signal.aborted) {stop();setError("Could not play this reply.");}
+      if (!controller.signal.aborted) {complete();setError("Could not play this reply.");}
     };
     window.speechSynthesis.speak(utterance);
     setStatus("playing");
@@ -153,7 +158,7 @@ export function ReplyVoice({text, autoPlay}: {text:string; autoPlay:boolean}) {
   }, [autoPlay, play]);
 
   return <>
-    <button type="button" className="reply-voice" onClick={() => {autoStarted.current = true; if (!active.current) unlockReplyVoice(); void play();}} aria-label={status === "idle" ? "Listen to Ava’s reply" : "Stop spoken reply"}>
+    <button type="button" className="reply-voice" disabled={listening} onClick={() => {autoStarted.current = true; if (active.current) {active.current.stop(); finished.current?.(); return;} unlockReplyVoice(); void play();}} aria-label={status === "idle" ? "Listen to Ava’s reply" : "Stop spoken reply"}>
       {status === "idle" ? <Volume2 size={15}/> : <Square size={13}/>}
       {status === "idle" ? "Listen" : "Stop"}
     </button>

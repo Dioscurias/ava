@@ -8,7 +8,7 @@ import {createContext, useContext, useEffect, useRef, useState} from "react";
 import {Brand} from "./brand";
 import {initial, type State, type Status} from "../lib/payments";
 
-const Store = createContext<{state: State; setState: React.Dispatch<React.SetStateAction<State>>; ready: boolean; openingPrompt: React.RefObject<string>} | null>(null);
+const Store = createContext<{state: State; setState: React.Dispatch<React.SetStateAction<State>>; ready: boolean; openingPrompt: React.RefObject<string>; openingVoice: React.RefObject<boolean>} | null>(null);
 export function useWorkspace() {
   const store = useContext(Store);
   if (!store) throw new Error("Workspace provider missing");
@@ -43,6 +43,7 @@ export function Workspace({children}: {children: React.ReactNode}) {
   const [state, setState] = useState(initial);
   const [ready, setReady] = useState(false);
   const openingPrompt = useRef("");
+  const openingVoice = useRef(false);
   useEffect(() => {
     try {
       const saved = localStorage.getItem("astra-light-workspace-v1");
@@ -54,7 +55,7 @@ export function Workspace({children}: {children: React.ReactNode}) {
     if (ready) try {localStorage.setItem("astra-light-workspace-v1", JSON.stringify(state));} catch { /* Storage is optional. */ }
   }, [state, ready]);
   const links = [{href:"/agent", label:"Agent", icon:MessageSquare},{href:"/activity",label:"Activity",icon:Activity},{href:"/settings",label:"Settings",icon:Settings2}];
-  return <Store.Provider value={{state, setState, ready, openingPrompt}}><ConnectionProvider endpoint={endpoint}><WalletProvider wallets={adapters}><div className="workspace">
+  return <Store.Provider value={{state, setState, ready, openingPrompt, openingVoice}}><ConnectionProvider endpoint={endpoint}><WalletProvider wallets={adapters}><div className="workspace">
     <header className="app-header">
       <Brand/>
       <nav className="workspace-nav" aria-label="Workspace">

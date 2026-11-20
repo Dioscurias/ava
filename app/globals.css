@@ -32,41 +32,28 @@ a,button,summary{transition:background .2s,color .2s,border-color .2s}
 .hero h1{font-size:clamp(52px,7.4vw,104px);line-height:.99;font-weight:560;margin:0 0 20px}
 .hero-description{max-width:410px;color:var(--muted);font-size:clamp(17px,1.8vw,22px);line-height:1.5}
 .hero-actions{margin-top:26px}
-.hero-chat{display:grid;gap:18px;min-width:0;margin:0;padding:clamp(16px,3vw,34px);background:var(--panel);border:1px solid var(--line);border-radius:6px}
-.hero-chat figcaption{color:var(--muted);font-size:13px}
-.hero-chat .hero-draft{width:100%;margin:12px 0 0;background:var(--bg);box-shadow:none}
+.hero-orb{width:min(100%, 62svh, 600px);justify-self:center}
+.hero-orb .voice-orb-large{width:100%;clip-path:circle(43%)}
+.hero-orb .voice-orb[data-rendered=false]::before{background:transparent url("/ava-reply-orb.webp") center/contain no-repeat}
+@media(prefers-reduced-motion:no-preference){
+  .hero-orb{transition:scale .28s ease-out}
+  .hero-orb:hover{scale:1.055}
+  .hero-orb[data-launching=true]{animation:agent-orb-send 420ms cubic-bezier(.5,0,.35,1) both}
+}
+.example-chat{display:grid;gap:18px;min-width:0;margin:0;padding:clamp(16px,3vw,34px);background:var(--panel);border:1px solid var(--line);border-radius:6px}
+.example-chat figcaption{color:var(--muted);font-size:13px}
+.example-chat .example-draft{width:100%;margin:12px 0 0;background:var(--bg);box-shadow:none}
 .hero-footer{padding-block:16px 26px}
 .landing-section{padding-block:clamp(68px,10vw,150px)}
 .landing-section h2{font-size:clamp(37px,6vw,86px);line-height:1.03;font-weight:460}
 .instruction-section{background:#edf2eb}
 .instruction-content{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:clamp(24px,6vw,90px);align-items:end}
 .instruction-content p{max-width:360px;margin-top:18px;color:var(--muted);font-size:clamp(16px,1.7vw,20px);line-height:1.5}
-.example-instruction{max-width:550px;color:var(--forest);font-size:clamp(24px,3.3vw,48px);line-height:1.18;font-weight:430}
-.walkthrough{display:grid;gap:clamp(24px,4vw,60px);margin-top:clamp(46px,6vw,92px)}
-.walkthrough-step{display:grid;grid-template-columns:minmax(190px,1fr) minmax(0,2.65fr);gap:clamp(22px,4.5vw,72px);align-items:center;margin:0;padding:clamp(18px,4vw,56px)}
-.walkthrough-instruction{background:#dcebe0}
-.walkthrough-timeline{background:#e1e9df}
-.walkthrough-review{background:#f7f8f5}
-.walkthrough>div:nth-child(2) .walkthrough-step{grid-template-columns:minmax(0,2.65fr) minmax(190px,1fr)}
-.walkthrough>div:nth-child(2) figcaption{grid-column:2;grid-row:1}
-.walkthrough>div:nth-child(2) .walkthrough-image{grid-column:1;grid-row:1}
-.walkthrough-step h3{max-width:13ch;font-size:clamp(25px,3vw,44px);font-weight:520;line-height:1.08}
-.walkthrough-step p,.safety-options p{color:var(--muted);font-size:16px;line-height:1.5;margin-top:12px}
-.walkthrough-image{position:relative;display:block;background:#f5f5f2}
-.walkthrough-image img{display:block;width:100%;height:auto}
-.walkthrough-expand{position:absolute;right:0;bottom:0;box-sizing:content-box;padding:12px;background:var(--forest);color:white}
-.walkthrough-image:hover .walkthrough-expand{background:var(--ink)}
-.walkthrough-note{color:var(--muted);font-size:13px}
 .safety-section{background:#d9ebde}
 .safety-options{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:clamp(18px,4vw,60px);margin:37px 0 28px;list-style:none}
 .safety-options h3{font-size:clamp(18px,2.1vw,28px);line-height:1.2;font-weight:550}
 .safety-options p{margin-top:7px}
-@media(max-width:850px){
-  .instruction-content,.walkthrough-step,.walkthrough>div:nth-child(2) .walkthrough-step{grid-template-columns:1fr}
-  .walkthrough>div:nth-child(2) figcaption,.walkthrough>div:nth-child(2) .walkthrough-image{grid-column:auto;grid-row:auto}
-  .walkthrough-step h3{max-width:none}
-  .walkthrough-step p{max-width:540px}
-}
+@media(max-width:850px){.instruction-content{grid-template-columns:minmax(0,1fr)}}
 @media(max-width:600px){
   .safety-options{grid-template-columns:1fr;margin-block:26px 22px}
 }
@@ -180,7 +167,8 @@ button.panel-heading:hover{background:var(--light-grey)}
 
 @media(max-width:850px){
   .hero-stage{grid-template-columns:minmax(0,1fr);align-content:center}
-  .hero-chat{max-width:580px;width:100%}
+  .hero-orb{width:min(100%, 44svh, 420px)}
+  .example-chat{max-width:580px;width:100%}
 }
 @media(max-width:650px){
   .hero h1{font-size:clamp(46px,11vw,68px)}

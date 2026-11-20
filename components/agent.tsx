@@ -39,7 +39,7 @@ const prompts = [
 
 export function Agent({demo, intro = false}: {demo: boolean; intro?: boolean}) {
   const router = useRouter();
-  const {state, setState, ready, openingPrompt} = useWorkspace();
+  const {state, setState, ready, openingPrompt, openingVoice} = useWorkspace();
   const {publicKey} = useWallet();
   const [leaving, setLeaving] = useState(false);
   const [arriving, setArriving] = useState(false);
@@ -53,6 +53,9 @@ export function Agent({demo, intro = false}: {demo: boolean; intro?: boolean}) {
   const [market, setMarket] = useState<Market>();
   const [escrow, setEscrow] = useState<string>();
   const [transcript, setTranscript] = useState("");
+  const [voiceSession, setVoiceSession] = useState(false);
+  const voiceSessionRef = useRef(false);
+  const rearmTimer = useRef<number | undefined>(undefined);
   const [listening, setListening] = useState(false);
   const [notice, setNotice] = useState("");
   const [panelOpen, setPanelOpen] = useState(true);
@@ -65,6 +68,7 @@ export function Agent({demo, intro = false}: {demo: boolean; intro?: boolean}) {
   const remaining = Math.max(0, state.limit - committed(state));
   useEffect(() => {if (turns.length > 1) conversationEnd.current?.scrollIntoView({behavior: reduced ? "instant" : "smooth", block:"nearest"});}, [turns, reduced]);
   useEffect(() => () => {
+    window.clearTimeout(rearmTimer.current);
     if (voiceRef.current) {
       voiceRef.current.onend = null;
       voiceRef.current.onresult = null;
@@ -180,55 +184,63 @@ export function Agent({demo, intro = false}: {demo: boolean; intro?: boolean}) {
     if (intro || !ready || !openingPrompt.current) return;
     const prompt = openingPrompt.current;
     openingPrompt.current = "";
+    voiceSessionRef.current = openingVoice.current;
+    setVoiceSession(openingVoice.current);
+    openingVoice.current = false;
     setArriving(true);
     addTurn(prompt);
     window.scrollTo({top: 0, behavior: "instant"});
     headingRef.current?.focus({preventScroll: true});
-  }, [addTurn, intro, openingPrompt, ready]);
+  }, [addTurn, intro, openingPrompt, openingVoice, ready]);
 
   const send = useCallback((prompt: string) => {
     const instruction = prompt.trim().slice(0, 600);
     if (!instruction || leaving) return;
     if (intro) {
       openingPrompt.current = instruction;
+      openingVoice.current = voiceSessionRef.current;
       if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) router.push("/agent/chat", {scroll: false});
       else setLeaving(true);
     } else {
       addTurn(instruction);
     }
-  }, [addTurn, intro, leaving, openingPrompt, router]);
+  }, [addTurn, intro, leaving, openingPrompt, openingVoice, router]);
   const latestSend = useRef(send);
   useLayoutEffect(() => {latestSend.current = send;}, [send]);
 
   function submit(event: React.FormEvent) {
     event.preventDefault();
     if (state.voice && input.trim()) unlockReplyVoice();
-    if (voiceRef.current) {
-      voiceRef.current.onresult = null;
-      voiceRef.current.onend = null;
-      voiceRef.current.stop();
-      voiceRef.current = null;
-      setListening(false);
-      setTranscript("");
-    }
+    stopListening();
     send(input);
   }
 
-  function dictate() {
-    if (listening) {
-      stopReplyVoice();
-      const active = voiceRef.current;
-      voiceRef.current = null;
-      active?.stop();
-      setListening(false);
-      setTranscript("");
-      return;
-    }
+  function stopListening() {
+    const active = voiceRef.current;
+    voiceRef.current = null;
+    active?.stop();
+    setListening(false);
+    setTranscript("");
+  }
+
+  function stopConversation() {
+    voiceSessionRef.current = false;
+    setVoiceSession(false);
+    window.clearTimeout(rearmTimer.current);
+    stopListening();
+    stopReplyVoice();
+  }
+
+  const listen = useCallback(() => {
+    if (!voiceSessionRef.current || voiceRef.current) return;
     const browser = window as Window & {SpeechRecognition?: new () => Recognition; webkitSpeechRecognition?: new () => Recognition};
     const Engine = browser.SpeechRecognition ?? browser.webkitSpeechRecognition;
-    if (!Engine) {setNotice("Voice input is unavailable in this browser. You can still type an instruction."); return;}
-    stopReplyVoice();
-    if (state.voice) unlockReplyVoice();
+    if (!Engine) {
+      voiceSessionRef.current = false;
+      setVoiceSession(false);
+      setNotice("Voice input is unavailable in this browser. You can still type an instruction.");
+      return;
+    }
     const recognition = new Engine();
     voiceRef.current = recognition;
     recognition.lang = "en-US";
@@ -243,6 +255,7 @@ export function Agent({demo, intro = false}: {demo: boolean; intro?: boolean}) {
       return true;
     }
 
+    let finalInstruction = "";
     recognition.onresult = event => {
       if (voiceRef.current !== recognition) return;
       setTranscript(Array.from(event.results).map(result => result[0]?.transcript ?? "").join(" ").trim());
@@ -250,22 +263,56 @@ export function Agent({demo, intro = false}: {demo: boolean; intro?: boolean}) {
         .filter(result => result.isFinal)
         .map(result => result[0]?.transcript ?? "")
         .join(" ").trim();
-      if (!instruction || !finish()) return;
+      if (!instruction || finalInstruction) return;
+      finalInstruction = instruction;
       recognition.stop();
-      latestSend.current(instruction);
     };
-    recognition.onend = () => {finish();};
+    function endSession(notice: string) {
+      if (!finish()) return;
+      voiceSessionRef.current = false;
+      setVoiceSession(false);
+      setNotice(notice);
+    }
+    recognition.onend = () => {
+      if (finalInstruction) {
+        if (finish()) latestSend.current(finalInstruction);
+      } else {
+        endSession("Listening paused. Tap Speak to continue.");
+      }
+    };
     recognition.onerror = () => {
-      if (finish()) setNotice("Voice input stopped. Check your microphone permissions or type your instruction.");
+      endSession("Voice input stopped. Check your microphone permissions or tap Speak to try again.");
     };
     setNotice("");
     try {
       recognition.start();
       setListening(true);
     } catch {
-      finish();
-      setNotice("Could not start voice input.");
+      endSession("Could not start voice input.");
     }
+  }, []);
+
+  const resumeVoice = useCallback(() => {
+    if (!voiceSessionRef.current) return;
+    window.clearTimeout(rearmTimer.current);
+    rearmTimer.current = window.setTimeout(listen, 300);
+  }, [listen]);
+
+  const latestTurn = turns.at(-1);
+  useEffect(() => {
+    if (voiceSession && !state.voice && latestTurn && !latestTurn.pending) resumeVoice();
+  }, [voiceSession, state.voice, latestTurn, resumeVoice]);
+
+  function dictate() {
+    if (voiceSessionRef.current) {
+      stopConversation();
+      return;
+    }
+    stopReplyVoice();
+    if (state.voice) unlockReplyVoice();
+    voiceSessionRef.current = true;
+    setVoiceSession(true);
+    listen();
   }
 
   const suggestions = <div className="suggestions">{prompts.map(prompt => <button key={prompt.label} onClick={() => {
@@ -281,11 +328,11 @@ export function Agent({demo, intro = false}: {demo: boolean; intro?: boolean}) {
   const composer = (
       <div className="composer-wrap">
         {notice && <p className="notice" role="status">{notice}</p>}
-        <form className="composer" onSubmit={submit}>{!intro && <VoiceOrb listening={listening}/>}<input ref={inputRef} value={input} onChange={e => setInput(e.target.value)} maxLength={600} aria-label="Payment instruction" placeholder="Tell Ava what to do…"/>{state.microphone !== false && <button className="icon-button dictation-control" type="button" title="Dictate an instruction" aria-label={listening ? "Stop dictation" : "Start dictation"} aria-pressed={listening} onClick={dictate}>{listening ? <AudioLines size={20}/> : <Mic size={19}/>}<span>{listening ? "Stop" : "Speak"}</span></button>}<button type="submit" className="send" aria-label="Send instruction" disabled={!input.trim() || leaving}><ArrowUp size={20}/></button></form>
+        <form className="composer" onSubmit={submit}>{!intro && <VoiceOrb listening={listening}/>}<input ref={inputRef} value={input} onChange={e => setInput(e.target.value)} maxLength={600} aria-label="Payment instruction" placeholder="Tell Ava what to do…"/>{state.microphone !== false && <button className="icon-button dictation-control" type="button" title="Dictate an instruction" aria-label={voiceSession ? "Stop voice conversation" : "Start voice conversation"} aria-pressed={voiceSession} onClick={dictate}>{listening ? <AudioLines size={20}/> : <Mic size={19}/>}<span>{voiceSession ? "Stop" : "Speak"}</span></button>}<button type="submit" className="send" aria-label="Send instruction" disabled={!input.trim() || leaving}><ArrowUp size={20}/></button></form>
         <button className="reply-voice" type="button" aria-pressed={state.voice} onClick={toggleSpokenReplies}>
           Spoken replies {state.voice ? "on" : "off"}
         </button>
-        <p className="composer-caption" role="status">{listening ? transcript || "Listening…" : ""}</p>
+        <p className="composer-caption" role="status">{listening ? transcript || "Listening…" : voiceSession ? "Ava is responding…" : ""}</p>
       </div>
   );
 
@@ -310,7 +357,7 @@ export function Agent({demo, intro = false}: {demo: boolean; intro?: boolean}) {
         <div className="turns" aria-live="polite">{turns.map(turn => <motion.article key={turn.id} initial={reduced || (arriving && turn === turns[0]) ? false : {opacity:0, y:8}} animate={{opacity:1,y:0}} className="turn">
           <p className="user-turn">{turn.prompt}</p>
           <div className="agent-turn"><Image className="reply-orb" src="/ava-reply-orb.webp" alt="" width={20} height={20} unoptimized/>
-            <div><div className="reply-heading"><strong>Ava</strong>{state.voice && !turn.pending && <ReplyVoice text={turn.reply} autoPlay={!listening && turn.id === turns.at(-1)?.id}/>}</div><p>{turn.reply}</p></div>
+            <div><div className="reply-heading"><strong>Ava</strong>{state.voice && !turn.pending && <ReplyVoice text={turn.reply} listening={listening} autoPlay={!listening && turn.id === latestTurn?.id} onFinished={voiceSession && turn.id === latestTurn?.id ? resumeVoice : undefined}/>}</div><p>{turn.reply}</p></div>
           </div>
         </motion.article>)}</div>
         <PaymentDraft memory={memory} highlighted={highlighted} escrow={escrow} canConfirm={ready && Boolean(readyDraft(memory))}
