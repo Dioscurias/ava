@@ -1,5 +1,5 @@
 import {describe, expect, test} from "vitest";
-import {chooseDraft, confirmDraft, defaultCondition, draftTurn, editDraft, emptyDraft, readyDraft, type DraftMemory} from "./draft-memory";
+import {chooseDraft, applyPlannedDraft, confirmDraft, defaultCondition, draftTurn, editDraft, emptyDraft, readyDraft, resolveKnownRecipient, type DraftMemory} from "./draft-memory";
 
 function turn(prompt: string, memory = emptyDraft) {
   const result = draftTurn(memory, prompt);
@@ -17,7 +17,7 @@ describe("conversational drafts", () => {
 
   test("asks for recipient after amount and defaults to manual release", () => {
     const first = turn("Hold 50");
-    expect(first.reply).toBe("Who should receive it?");
+    expect(first.reply).toBe("Who should I pay?");
     expect(turn("Dave", first.memory).memory.current).toMatchObject({status: "ready", recipient: "Dave", condition: defaultCondition});
   });
 
@@ -66,10 +66,68 @@ describe("conversational drafts", () => {
     expect(turn("Pay Maya", confirmed).memory.current).toEqual({recipient: "Maya", status: "incomplete"});
   });
 
+  test.each(["make it 60 instead", "make it sixty instead"])("corrects the hackathon draft with %s", correction => {
+    const start = turn("Hold 75 USDC for Maya until I approve the design files").memory;
+    const revised = turn(correction, start).memory;
+    const draft = {amount: 6000, recipient: "Maya", condition: "Payer approves the design files"};
+    expect(readyDraft(revised)).toEqual(draft);
+
+    const edited = editDraft(revised, {amount: 6500});
+    expect(readyDraft(edited)?.amount).toBe(6500);
+    const restored = turn("Undo", edited).memory;
+    expect(readyDraft(restored)).toEqual(draft);
+    expect(confirmDraft(restored).current).toEqual({...draft, status: "confirmed"});
+  });
+
   test("editing creates an undoable version", () => {
     const start = turn("Hold 100 USDC for Dave").memory;
     const edited = editDraft(start, {recipient: "Maya", amount: 7500});
     expect(edited.current).toMatchObject({recipient: "Maya", amount: 7500});
     expect(turn("undo", edited).memory.current).toEqual(start.current);
   });
+});
+
+test.each(["pay him", "pay her", "pay them", "pay someone", "pay", "please pay him", "pay them, please", "Send 75 USDC to", "change it to unknown", "Send 75 USDC to them"])(
+  "requires a named recipient after %s", prompt => {
+    const original = turn("Hold 75 USDC for Maya").memory;
+    const reply = turn(prompt, original);
+    expect(reply.reply).toBe("Who should I pay?");
+    expect(reply.memory.current.recipient).toBeUndefined();
+    expect(readyDraft(reply.memory)).toBeNull();
+    expect(readyDraft(turn("Bob", reply.memory).memory)?.recipient).toBe("Bob");
+  },
+);
+
+test("a garbled instruction requires the amount to be restated", () => {
+  const original = turn("Hold 75 USDC for Maya").memory;
+  const {memory, reply} = turn("nd 10000 USDC to Bob", original);
+  expect(reply).toBe("How much should I hold for Bob?");
+  expect(memory.current.amount).toBeUndefined();
+  expect(readyDraft(memory)).toBeNull();
+  expect(readyDraft(turn("10000", memory).memory)?.amount).toBe(1_000_000);
+});
+
+test("planned amounts must match a literal or spoken amount in the request", () => {
+  const original = turn("Hold 75 USDC for Maya").memory;
+  expect(readyDraft(applyPlannedDraft(original, "Earmark 10000 USDC for Bob.", {amount: 10_000, recipient: "Bob"}).memory)).toBeNull();
+  expect(readyDraft(applyPlannedDraft(original, "Earmark seventy-five USDC for Maya.", {amount: 7500}).memory)?.amount).toBe(7500);
+  expect(readyDraft(applyPlannedDraft(original, "Use a total of 10000.", {amount: 1_000_000}).memory)?.amount).toBe(1_000_000);
+  expect(readyDraft(applyPlannedDraft(original, "Pay them", {recipient: "them"}).memory)).toBeNull();
+});
+
+
+test("a short known name needs confirmation before the draft is ready", () => {
+  const draft = turn("Hold 75 USDC for Maya until I approve the design files").memory;
+  const suggestion = resolveKnownRecipient(emptyDraft, draft, ["Maya Chen", "maya chen", "Bob"]);
+  expect(suggestion?.reply).toMatch(/^Maya Chen\?$/i);
+  expect(readyDraft(suggestion!.memory)).toBeNull();
+  expect(readyDraft(turn("yes", suggestion!.memory).memory)).toEqual({
+    amount: 7500, recipient: "Maya Chen", condition: "Payer approves the design files",
+  });
+  expect(resolveKnownRecipient(emptyDraft, draft, ["Maya Chen", "Maya Patel"])?.memory.choices).toHaveLength(2);
+});
+
+test("market conditions start with a capital letter", () => {
+  expect(turn("Pay Maya 20 USDC until the next BTC 5-minute round settles up").memory.current.condition)
+    .toBe("The next BTC 5-minute round settles up");
 });

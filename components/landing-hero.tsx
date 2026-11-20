@@ -26,8 +26,8 @@ export function LandingHero() {
     </header>
     <div className="hero-stage wrap">
       <div className="hero-copy">
-        <h1 id="hero-title">Money on<br/>your terms</h1>
-        <p className="hero-description">Tell Ava who to pay and when. Review the terms, then run the escrow in Simulation or with Solana Devnet test funds.</p>
+        <h1 id="hero-title">Talk to Ava.<br/>Hold USDC.</h1>
+        <p className="hero-description">Ava is a voice-first payment assistant. Say who to pay and when to release the funds. Review the terms, then try the escrow on Solana Devnet or in Simulation.</p>
         <div className="hero-actions">
           <Link className="button primary" href={agentPath} onNavigate={event => {
             if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;

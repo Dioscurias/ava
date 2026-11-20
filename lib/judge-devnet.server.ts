@@ -4,8 +4,11 @@ import {getAssociatedTokenAddressSync, getMint, TOKEN_PROGRAM_ID, unpackAccount}
 import {Connection, Keypair, PublicKey, clusterApiUrl, Transaction} from "@solana/web3.js";
 import {configurePolicy, devnetGenesis, devnetMint, escrowAddress, explorer, formatBaseUnits, fundEscrow, manageEscrow, policyAddress, storedEscrow} from "./devnet";
 
+import {redis, redisEnabled} from "./stream-events.server";
+
 export const judgeAmount = 100_000n;
 const judgeSpendingCap = 5_000_000n;
+const dailyEscrows = 10;
 const solReserve = 20_000_000;
 const actions = {fund:1, attest:2, release:3, cancel:4} as const;
 export type JudgeAction = keyof typeof actions;
@@ -23,6 +26,12 @@ function signer(role: "PAYER" | "RECIPIENT") {
         bytes.some(byte => !Number.isInteger(byte) || byte < 0 || byte > 255)) throw Error();
     return Keypair.fromSecretKey(Uint8Array.from(bytes));
   } catch {throw new JudgeError(`Judge ${role.toLowerCase()} keypair is invalid.`,503);}
+}
+
+function recipientAddress() {
+  const value = process.env.AVA_JUDGE_RECIPIENT_ADDRESS;
+  try {return value ? new PublicKey(value) : signer("RECIPIENT")?.publicKey ?? null;}
+  catch {throw new JudgeError("The judge recipient address is invalid.",503);}
 }
 
 function programAddress() {
@@ -54,16 +63,16 @@ export async function getJudgeStatus() {
   const connection = rpcConnection();
   const program = programAddress();
   const payer = signer("PAYER");
-  const recipient = signer("RECIPIENT");
+  const recipient = recipientAddress();
   const base = {
     cluster:"devnet", programId:program?.toBase58() ?? null, programExecutable:false,
     programExplorerUrl:program ? explorer("address",program.toBase58()) : null,
-    mint:devnetMint.toBase58(), classicSpl:false, decimals:null as number | null,
+    mint:devnetMint.toBase58(), mintExplorerUrl:explorer("address",devnetMint.toBase58()), classicSpl:false, decimals:null as number | null,
     rpc:{healthy:false,slot:null as number | null},
-    judge:{configured:Boolean(payer && recipient && !payer.publicKey.equals(recipient.publicKey)),ready:false,
-      accessCodeRequired:Boolean(process.env.AVA_JUDGE_ACCESS_CODE),
+    judge:{configured:Boolean(payer && recipient && !payer.publicKey.equals(recipient)),ready:false,
+      dailyCapConfigured:redisEnabled(), accessCodeRequired:Boolean(process.env.AVA_JUDGE_ACCESS_CODE),
       payer:payer ? {address:payer.publicKey.toBase58(),sol:null as number | null,testUsdc:null as string | null} : null,
-      recipient:recipient ? {address:recipient.publicKey.toBase58(),sol:null as number | null,testUsdc:null as string | null} : null},
+      recipient:recipient ? {address:recipient.toBase58(),sol:null as number | null,testUsdc:null as string | null} : null},
     error:null as string | null,
   };
   try {
@@ -73,13 +82,13 @@ export async function getJudgeStatus() {
       program ? connection.getAccountInfo(program) : null,
       getMint(connection,devnetMint,"confirmed",TOKEN_PROGRAM_ID),
       payer ? balance(connection,payer.publicKey) : null,
-      recipient ? balance(connection,recipient.publicKey) : null,
+      recipient ? balance(connection,recipient) : null,
     ]);
     return {
       ...base, rpc:{healthy:true,slot}, programExecutable:Boolean(programInfo?.executable),
       classicSpl:true,decimals:mint.decimals,
       judge:{...base.judge,payer:payerBalance,recipient:recipientBalance,
-        ready:Boolean(base.judge.configured && programInfo?.executable && mint.decimals===6 && payerBalance &&
+        ready:Boolean(base.judge.configured && base.judge.dailyCapConfigured && programInfo?.executable && mint.decimals===6 && payerBalance &&
           payerBalance.lamports>=solReserve && BigInt(payerBalance.testUsdcRaw)>=judgeAmount)},
     };
   } catch {return {...base,error:"Devnet RPC verification failed."};}
@@ -119,13 +128,29 @@ async function findSignature(connection: Connection, program: PublicKey, escrow:
   throw new JudgeError("The escrow updated, but its transaction history is not available yet. Retry shortly.",503);
 }
 
-export async function runJudgeAction(action: JudgeAction, payload: unknown, connection = rpcConnection(), scheduleFallback?: (signature: string, at: number) => void) {
+async function reserveDailyEscrow(sponsor: string, requestId: string) {
+  if (!redisEnabled()) throw new JudgeError("The judge daily cap is not configured.",503);
+  const day = new Date().toISOString().slice(0,10);
+  let accepted: number;
+  try {
+    accepted = await redis<number>("EVAL", `
+      if redis.call('sismember', KEYS[1], ARGV[1]) == 1 then return 1 end
+      if redis.call('scard', KEYS[1]) >= tonumber(ARGV[2]) then return 0 end
+      redis.call('sadd', KEYS[1], ARGV[1])
+      redis.call('expire', KEYS[1], 172800)
+      return 1
+    `,1,`ava:judge:quota:${sponsor}:${day}`,requestId,dailyEscrows);
+  } catch {throw new JudgeError("The daily cap could not be checked. Try again shortly.",503);}
+  if (accepted !== 1) throw new JudgeError("The judge sponsor has reached its 1.00 USDC daily cap.",429);
+}
+
+export async function runJudgeAction(action: JudgeAction, payload: unknown, connection = rpcConnection(), scheduleFallback?: (signature: string, at: number) => void, reserve = reserveDailyEscrow) {
   if (!payload || typeof payload !== "object") throw new JudgeError("Expected a JSON request.",400);
   const values = payload as Record<string,unknown>;
   const program = programAddress();
   const payer = signer("PAYER");
-  const recipient = signer("RECIPIENT");
-  if (!program || !payer || !recipient || payer.publicKey.equals(recipient.publicKey)) throw new JudgeError("Judge mode is not configured.",503);
+  const recipient = recipientAddress();
+  if (!program || !payer || !recipient || payer.publicKey.equals(recipient)) throw new JudgeError("Judge mode is not configured.",503);
   const accessCode = process.env.AVA_JUDGE_ACCESS_CODE;
   if (accessCode && (typeof values.accessCode !== "string" || !equalSecret(values.accessCode,accessCode))) {
     throw new JudgeError("Enter the judge access code.",401);
@@ -147,7 +172,7 @@ export async function runJudgeAction(action: JudgeAction, payload: unknown, conn
       throw new JudgeError("Enter a public release condition of up to 200 bytes.",400);
     }
     if (escrow) {
-      if (escrow.condition!==condition || escrow.amount!==judgeAmount || !escrow.recipient.equals(recipient.publicKey)) {
+      if (escrow.condition!==condition || escrow.amount!==judgeAmount || !escrow.recipient.equals(recipient)) {
         throw new JudgeError("The request ID is already in use for different terms.",409);
       }
       signature = await findSignature(connection,program,key,actions.fund);
@@ -159,11 +184,12 @@ export async function runJudgeAction(action: JudgeAction, payload: unknown, conn
       if (!(await connection.getAccountInfo(policy))?.owner.equals(program)) {
         tx.add(configurePolicy(program,payer.publicKey,judgeSpendingCap,3));
       }
-      tx.add(fundEscrow(program,payer.publicKey,{recipient:recipient.publicKey,amount:judgeAmount,condition,nonce}));
+      tx.add(fundEscrow(program,payer.publicKey,{recipient:recipient,amount:judgeAmount,condition,nonce}));
+      await reserve(payer.publicKey.toBase58(),values.requestId);
       signature = await submit(connection,payer,tx,scheduleFallback);
     }
   } else {
-    if (!escrow || !escrow.payer.equals(payer.publicKey) || !escrow.recipient.equals(recipient.publicKey)) {
+    if (!escrow || !escrow.payer.equals(payer.publicKey) || !escrow.recipient.equals(recipient)) {
       throw new JudgeError("The funded escrow could not be found.",404);
     }
     const alreadyApplied = action==="attest" ? [2,3].includes(escrow.status) :
@@ -178,6 +204,6 @@ export async function runJudgeAction(action: JudgeAction, payload: unknown, conn
   return {
     action, signature, explorerUrl:explorer("tx",signature), escrow:key.toBase58(),
     escrowExplorerUrl:explorer("address",key.toBase58()), requestId:values.requestId, proof,
-    amount:formatBaseUnits(judgeAmount), recipient:recipient.publicKey.toBase58(),
+    amount:formatBaseUnits(judgeAmount), recipient:recipient.toBase58(),
   };
 }

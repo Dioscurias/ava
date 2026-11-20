@@ -134,6 +134,7 @@ export function DevnetWorkspace() {
 
   return <main className="app-main detail-page devnet-page">
     <h1>Solana Devnet</h1>
+    <p><Link className="text-link" href="/agent/chat?mode=devnet">Draft a Devnet payment with Ava →</Link></p>
     <JudgeDevnet/>
     <h2 className="wallet-path-title">Use your own wallet</h2>
     <p>Connect your wallet to sign each test USDC transaction yourself.</p>

@@ -1,4 +1,4 @@
-import { parseMarketCondition, type MarketChoice } from "./gemini-condition";
+import { normalizeMarketTitle, parseMarketCondition, type MarketChoice } from "./gemini-condition";
 
 type Contract = {
   instrumentSymbol: string;
@@ -37,7 +37,7 @@ async function read<T>(path: string, fresh = false): Promise<T> {
 }
 
 export async function listActiveEvents(q = "", category = "", fresh = false) {
-  const query = new URLSearchParams({ status: "active", limit: category === "crypto" ? "500" : "50" });
+  const query = new URLSearchParams({ status: "active", limit: q ? "50" : "500" });
   if (q) query.set("search", q);
   if (category) query.set("category", category);
   return (await read<EventList>(`?${query}`, fresh)).data;
@@ -50,14 +50,25 @@ export function getEvent(ticker: string) {
 export function matchMarkets(events: Event[], condition: string, now = Date.now()): MarketChoice[] {
   const request = parseMarketCondition(condition);
   if (!request) return [];
+  const query = normalizeMarketTitle(request.query);
+  const words = query.split(" ");
   const results = events.flatMap(event => event.contracts.flatMap(raw => {
     const contract = normalizeContract(raw);
     if (contract.status !== "active" || contract.marketState !== "open" || !(Date.parse(contract.expiryDate) > now)) return [];
     if (request.next && !contract.instrumentSymbol.includes("BTC05M")) return [];
     if ((request.next || request.directional) && contract.label.toLowerCase() !== "up") return [];
-    return [{ ...contract, ticker: event.ticker, title: event.title, side: request.side }];
+    const title = normalizeMarketTitle(event.title);
+    const full = normalizeMarketTitle(`${event.title} ${contract.label}`);
+    const tokens = new Set(full.split(" "));
+    const score = query === title || query === full ? 2 : words.every(word => tokens.has(word)) ? 1 : 0;
+    if (!request.next && score === 0) return [];
+    return [{choice: {...contract, ticker: event.ticker, title: event.title, side: request.side}, score}];
   }));
-  if (!request.next || !results.length) return results;
-  const earliest = Math.min(...results.map(result => Date.parse(result.expiryDate)));
-  return results.filter(result => Date.parse(result.expiryDate) === earliest);
+  if (!results.length) return [];
+  if (!request.next) {
+    const best = Math.max(...results.map(result => result.score));
+    return results.filter(result => result.score === best).map(result => result.choice);
+  }
+  const earliest = Math.min(...results.map(({choice}) => Date.parse(choice.expiryDate)));
+  return results.filter(({choice}) => Date.parse(choice.expiryDate) === earliest).map(result => result.choice);
 }

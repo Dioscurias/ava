@@ -1,6 +1,6 @@
 import {test} from "node:test";
 import assert from "node:assert/strict";
-import {parsePayment, guard, initial, changeEscrow} from "../lib/payments.ts";
+import {parsePayment, guard, committed, initial, changeEscrow, conditionOutcome} from "../lib/payments.ts";
 
 test("extracts a conditional payment and requires a recognizable amount and recipient", () => {
   assert.deepEqual(parsePayment("Send 250 USDC to Maya when she delivers the files."), {
@@ -52,4 +52,27 @@ test("drafts conversational requests and keeps missing terms for clarification",
   assert.equal(parsePayment("I want to pay Dave Chase"), null);
   assert.equal(parsePayment("Make a payment Dave Chase the amount is -$100"), null);
   assert.equal(parsePayment("Make a payment Dave Chase the amount is $100 or $120"), null);
+});
+
+test("activity groups conditions independently of payment status", () => {
+  const [pending, ready, completed] = initial.escrows;
+  assert.equal(conditionOutcome(pending), "Pending");
+  assert.equal(conditionOutcome(ready), "Met");
+  assert.equal(conditionOutcome(completed), "Met");
+  const current = (state: typeof initial) => state.escrows.find(escrow => escrow.id === pending.id)!;
+  assert.equal(conditionOutcome(current(changeEscrow(initial, pending.id, "release"))), "Unmet");
+  assert.equal(conditionOutcome(current(changeEscrow(initial, pending.id, "cancel"))), "Unmet");
+  const verified = changeEscrow(initial, pending.id, "verify");
+  const paused = changeEscrow(verified, pending.id, "pause");
+  assert.equal(conditionOutcome(current(paused)), "Met");
+  assert.equal(conditionOutcome(current(changeEscrow(paused, pending.id, "resume"))), "Pending");
+});
+
+
+test("the simulation workspace minimum counts active escrows only", () => {
+  assert.equal(committed(initial), 57_500);
+  const pending = initial.escrows[0];
+  const after = changeEscrow(initial, pending.id, "release");
+  assert.equal(committed(after), 12_500);
+  assert.equal(guard({...after, limit: 12_600}, 100), null);
 });

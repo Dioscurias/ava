@@ -126,9 +126,10 @@ async function main() {
     console.log("On-chain escrow passed: fund, cap, attestation, pause, recipient validation, release, duplicate rejection, cancellation.");
     process.env.AVA_DEVNET_PROGRAM = program.toBase58();
     process.env.AVA_JUDGE_PAYER_KEYPAIR = JSON.stringify([...payer.secretKey]);
-    process.env.AVA_JUDGE_RECIPIENT_KEYPAIR = JSON.stringify([...recipientSigner.secretKey]);
+    process.env.AVA_JUDGE_RECIPIENT_ADDRESS = recipientSigner.publicKey.toBase58();
     delete process.env.AVA_JUDGE_ACCESS_CODE;
 
+    const allowLocalReservation = async () => {};
     // Exercise the production signer and instruction path with the local validator
     // and a fixture mint. Only its genesis identity is substituted for this test.
     const localJudge = new Proxy(connection,{
@@ -141,10 +142,12 @@ async function main() {
     for (const action of ["release","cancel"] as const) {
       const requestId = randomBytes(16).toString("hex");
       const payload = {requestId,condition:`Judge integration: ${action}`};
-      const funded = await runJudgeAction("fund",payload,localJudge);
+      const rejectReservation = async () => {throw new Error("daily cap reached");};
+      await assert.rejects(runJudgeAction("fund",payload,localJudge,undefined,rejectReservation),/daily cap reached/);
+      const funded = await runJudgeAction("fund",payload,localJudge,undefined,allowLocalReservation);
       assert.equal(funded.amount,"0.10");
       assert.equal(funded.explorerUrl,`https://explorer.solana.com/tx/${funded.signature}?cluster=devnet`);
-      assert.equal((await runJudgeAction("fund",payload,localJudge)).signature,funded.signature);
+      assert.equal((await runJudgeAction("fund",payload,localJudge,undefined,allowLocalReservation)).signature,funded.signature);
       await assert.rejects(runJudgeAction("cancel",{requestId,proof:"wrong"},localJudge),/does not belong/);
       const authorized = {requestId,proof:funded.proof};
       if (action==="release") {

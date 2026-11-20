@@ -17,7 +17,7 @@ export const initial: State = {
 };
 
 export const active = (e: Escrow) => e.status !== "Completed" && e.status !== "Cancelled";
-export const committed = (state: State) => state.escrows.reduce((total, e) => total + (e.status !== "Cancelled" ? e.amount : 0), 0);
+export const committed = (state: State) => state.escrows.reduce((total, e) => total + (active(e) ? e.amount : 0), 0);
 export const money = (amount: number) => new Intl.NumberFormat("en-US", {minimumFractionDigits: 2, maximumFractionDigits: 2}).format(amount / 100);
 
 const paymentLead = /^(?:so[,\s]+)?(?:(?:i\s+(?:wanna|want\s+to|would\s+like\s+to)|i['’]d\s+like\s+to|(?:could|can|would)\s+you|please)[,\s]+)?/i;
@@ -72,4 +72,19 @@ export function changeEscrow(state: State, id: string, action: Action, amount = 
   const [status, label] = updates[action];
   const updated = {...escrow, status, amount: escrow.amount + (action === "add" ? amount : 0), events:[...escrow.events, {label, at:new Date().toISOString()}]};
   return {...state, escrows:state.escrows.map(e => e.id === id ? updated : e)};
+}
+
+export function conditionOutcome(escrow: Escrow): "Met" | "Pending" | "Unmet" {
+  if (escrow.status === "Ready to release") return "Met";
+  if (escrow.status === "Completed") {
+    return escrow.events.at(-1)?.label === "Early release approved by you" ? "Unmet" : "Met";
+  }
+
+  // Older browser records preserve condition decisions in their timeline.
+  for (let index = escrow.events.length - 1; index >= 0; index--) {
+    const {label} = escrow.events[index];
+    if (label === "Escrow resumed. Condition requires review.") break;
+    if (label === "Release condition marked as met by you" || label === "Signed invoice confirmed") return "Met";
+  }
+  return escrow.status === "Cancelled" ? "Unmet" : "Pending";
 }

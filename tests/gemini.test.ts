@@ -46,3 +46,32 @@ test("the BTC lookup refreshes an expired cached round", async (t) => {
   assert.equal((await response.json()).choices[0]?.expiryDate, expiryDate);
   assert.equal(fetch.mock.callCount(), 2);
 });
+
+test("condition phrases handle if, when, and a copied Up suffix", () => {
+  const title = btc.title.toUpperCase().replace(/:/g, " ");
+  for (const [condition, side] of [
+    [`if ${title} · Up resolves no`, "no"],
+    [`if ${title} happens`, "yes"],
+    [`when ${title} settles`, "yes"],
+    [`until ${title} settles down`, "no"],
+  ]) {
+    const [choice] = matchMarkets([btc], condition, now);
+    assert.equal(choice?.instrumentSymbol, btc.contracts[0].instrumentSymbol);
+    assert.equal(choice?.expiryDate, btc.contracts[0].expiryDate);
+    assert.equal(choice?.side, side);
+  }
+  assert.deepEqual(matchMarkets([btc], "if an unrelated market resolves yes", now), []);
+});
+
+test("YES ask is the buy quote and YES bid is the sell quote", () => {
+  const {yesAsk, yesBid} = normalizeContract(btc.contracts[0]);
+  assert.equal(yesAsk, Number(btc.contracts[0].prices.buy.yes));
+  assert.equal(yesBid, Number(btc.contracts[0].prices.sell.yes));
+  assert.ok(yesAsk! > yesBid!);
+});
+
+test("matching titles keep different contract expiries or tenors selectable", () => {
+  const other = {...btc, ticker: "other-market", contracts: [{...btc.contracts[0], instrumentSymbol:"other-instrument"}]};
+  const result = matchMarkets([btc, other], `if ${btc.title} · Up resolves yes`, now);
+  assert.deepEqual(result.map(choice => choice.instrumentSymbol), [btc.contracts[0].instrumentSymbol, "other-instrument"]);
+});

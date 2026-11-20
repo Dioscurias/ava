@@ -1,10 +1,10 @@
 "use client";
 import Link from "next/link";
-import {usePathname} from "next/navigation";
+import {usePathname, useSearchParams} from "next/navigation";
 import {Activity, CircleHelp, MessageSquare, Settings2, Wallet} from "lucide-react";
 import {ConnectionProvider, WalletProvider, useWallet} from "@solana/wallet-adapter-react";
 import {clusterApiUrl} from "@solana/web3.js";
-import {createContext, useContext, useEffect, useRef, useState} from "react";
+import {Suspense, createContext, useContext, useEffect, useLayoutEffect, useRef, useState} from "react";
 import {Brand} from "./brand";
 import {initial, type State, type Status} from "../lib/payments";
 
@@ -38,8 +38,36 @@ function WalletMenu() {
     </div></details>;
 }
 
+function PaymentMode({devnet}: {devnet: boolean}) {
+  return <nav className="mode-switch" aria-label="Payment mode">
+    <Link href="/agent" aria-current={!devnet ? "true" : undefined}>Simulation</Link>
+    <Link href="/devnet" aria-current={devnet ? "true" : undefined}>Devnet</Link>
+  </nav>;
+}
+
+function CurrentPaymentMode({path}: {path: string}) {
+  const mode = useSearchParams();
+  return <PaymentMode devnet={path === "/devnet" || (path === "/agent/chat" && mode.get("mode") === "devnet")}/>;
+}
+
 export function Workspace({children}: {children: React.ReactNode}) {
   const path = usePathname();
+  const workspaceBody = useRef<HTMLDivElement>(null);
+  const previousPath = useRef(path);
+
+  useLayoutEffect(() => {
+    const from = previousPath.current;
+    previousPath.current = path;
+    if (from === path || (from === "/agent" && path === "/agent/chat")) return;
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+
+    const page = workspaceBody.current?.querySelector<HTMLElement>(".app-main");
+    const transition = page?.animate?.(
+      [{opacity: 0.7, transform: "translateY(4px)"}, {opacity: 1, transform: "translateY(0)"}],
+      {duration: 180, easing: "cubic-bezier(.2,.7,.3,1)"},
+    );
+    return () => transition?.cancel();
+  }, [path]);
   const [state, setState] = useState(initial);
   const [ready, setReady] = useState(false);
   const openingPrompt = useRef("");
@@ -65,13 +93,12 @@ export function Workspace({children}: {children: React.ReactNode}) {
           </Link>
         ))}
       </nav>
-      <nav className="mode-switch" aria-label="Payment mode">
-        <Link href="/agent" aria-current={path !== "/devnet" ? "true" : undefined}>Simulation</Link>
-        <Link href="/devnet" aria-current={path === "/devnet" ? "true" : undefined}>Devnet</Link>
-      </nav>
+      <Suspense fallback={<PaymentMode devnet={path === "/devnet"}/>}>
+        <CurrentPaymentMode path={path}/>
+      </Suspense>
       <WalletMenu/>
     </header>
-    <div className="workspace-body">
+    <div className="workspace-body" ref={workspaceBody}>
     {state.paused && <div className="paused-banner" role="status">Agent paused. <Link href="/settings">Manage permissions</Link></div>}
     {children}
     <footer className="app-footer"><CircleHelp size={14}/> {path === "/devnet" ? "Solana Devnet · Test tokens only" : "Simulation mode · No funds move on-chain"}</footer>

@@ -55,7 +55,7 @@ export default function Home() {
       </div>
     </section>
     <footer className="wrap marketing-footer">
-      <Brand/><span>Built for the UBC 2026 Hackathon</span><Link href="/agent">Open workspace <ArrowUpRight size={14}/></Link>
+      <Brand/><span>Built for the UBC 2026 Hackathon</span><a href="https://github.com/Dioscurias/ava">GitHub</a><Link href="/agent">Open workspace <ArrowUpRight size={14}/></Link>
     </footer>
   </main>;
 }

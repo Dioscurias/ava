@@ -151,12 +151,27 @@ export function VoiceOrb({listening, large = false, processing = false, chamberL
   const processingStart = useRef<number | null>(null);
   const hover = useRef({start: -Infinity, x: 0, y: 0, z: 1});
   const [rendered, setRendered] = useState(false);
+  const [enable3D, setEnable3D] = useState(false);
+
+  useEffect(() => {
+    const motion = matchMedia("(prefers-reduced-motion: reduce)");
+    const device = navigator as Navigator & {deviceMemory?: number; connection?: {saveData?: boolean}};
+    const lowPower = (device.deviceMemory ?? Infinity) <= 4 ||
+      (device.hardwareConcurrency || Infinity) <= 4 || Boolean(device.connection?.saveData);
+    const update = () => {
+      if (motion.matches || lowPower) setRendered(false);
+      setEnable3D(!motion.matches && !lowPower);
+    };
+    update();
+    motion.addEventListener("change", update);
+    return () => motion.removeEventListener("change", update);
+  }, []);
 
   useEffect(() => {listeningRef.current = listening;}, [listening]);
   useEffect(() => {processingStart.current = processing ? performance.now() : null;}, [processing]);
 
   useEffect(() => {
-    if (!listening || !navigator.mediaDevices?.getUserMedia) return;
+    if (!rendered || !listening || !navigator.mediaDevices?.getUserMedia) return;
     let closed = false;
     let stream: MediaStream | undefined;
     let context: AudioContext | undefined;
@@ -197,11 +212,12 @@ export function VoiceOrb({listening, large = false, processing = false, chamberL
       if (context && context.state !== "closed") void context.close().catch(() => {});
       level.current = 0;
     };
-  }, [listening]);
+  }, [listening, rendered]);
 
   useEffect(() => {
+    if (!enable3D) return;
     const canvas = canvasRef.current;
-    const gl = canvas?.getContext("webgl", {alpha: true, antialias: false});
+    const gl = canvas?.getContext("webgl", {alpha: true, antialias: false, failIfMajorPerformanceCaveat: true});
     if (!canvas || !gl) return;
     function compile(gpu: WebGLRenderingContext, type: number, source: string) {
       const shader = gpu.createShader(type);
@@ -275,7 +291,7 @@ export function VoiceOrb({listening, large = false, processing = false, chamberL
       motion.removeEventListener("change", restart);
       dispose();
     };
-  }, [large, chamberLight]);
+  }, [large, chamberLight, enable3D]);
 
   function rippleAtPointer(event: React.PointerEvent<HTMLDivElement>) {
     if (!large || event.pointerType === "touch") return;
