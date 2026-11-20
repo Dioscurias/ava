@@ -32,3 +32,17 @@ test("quotes can be absent on a settled contract", () => {
   assert.equal(contract.resolutionSide, settled.contracts[0].resolutionSide);
   assert.ok(contract.resolvedAt);
 });
+
+test("the BTC lookup refreshes an expired cached round", async (t) => {
+  const route = await import("../app/api/gemini/route");
+  const expiryDate = new Date(Date.now() + 60_000).toISOString();
+  const fresh = {...btc, contracts: [{...btc.contracts[0], expiryDate}]};
+  const fetch = t.mock.method(globalThis, "fetch", async (_url: RequestInfo | URL, options?: RequestInit) =>
+    Response.json({data: [options?.cache === "no-store" ? fresh : {...btc, contracts: [{...btc.contracts[0], expiryDate: "2000-01-01T00:00:00Z"}]}]}));
+  const url = new URL("http://localhost/api/gemini");
+  url.searchParams.set("condition", "the next BTC 5-minute round settles up");
+  const response = await route.GET(new Request(url));
+  assert.equal(response.status, 200);
+  assert.equal((await response.json()).choices[0]?.expiryDate, expiryDate);
+  assert.equal(fetch.mock.callCount(), 2);
+});

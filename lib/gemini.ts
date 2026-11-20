@@ -27,20 +27,20 @@ export function normalizeContract(contract: Contract) {
   };
 }
 
-async function read<T>(path: string): Promise<T> {
+async function read<T>(path: string, fresh = false): Promise<T> {
   const response = await fetch(`https://api.gemini.com/v1/prediction-markets/events${path}`, {
-    next: { revalidate: 5 },
+    ...(fresh ? {cache: "no-store"} : {next: {revalidate: 5}}),
     signal: AbortSignal.timeout(10_000),
   });
   if (!response.ok) throw new Error(`Gemini returned HTTP ${response.status}`);
   return response.json();
 }
 
-export async function listActiveEvents(q = "", category = "") {
+export async function listActiveEvents(q = "", category = "", fresh = false) {
   const query = new URLSearchParams({ status: "active", limit: category === "crypto" ? "500" : "50" });
   if (q) query.set("search", q);
   if (category) query.set("category", category);
-  return (await read<EventList>(`?${query}`)).data;
+  return (await read<EventList>(`?${query}`, fresh)).data;
 }
 
 export function getEvent(ticker: string) {

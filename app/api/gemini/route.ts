@@ -7,7 +7,12 @@ export async function GET(request: Request) {
   if (!query) return Response.json({ error: "Enter a Gemini market condition." }, { status: 400 });
   try {
     const events = await listActiveEvents(query.query, query.next ? "crypto" : "");
-    return Response.json({ choices: matchMarkets(events, condition) });
+    let choices = matchMarkets(events, condition);
+    // Next can return the old listing while it revalidates across a round boundary.
+    if (query.next && choices.length === 0) {
+      choices = matchMarkets(await listActiveEvents(query.query, "crypto", true), condition);
+    }
+    return Response.json({choices}, {headers: {"Cache-Control": "no-store"}});
   } catch {
     return Response.json({ error: "Gemini market data is temporarily unavailable." }, { status: 502 });
   }
