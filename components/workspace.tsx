@@ -35,7 +35,7 @@ function WalletMenu() {
     void connect().catch(() => setError("Connection declined or unavailable."));
   }, [chosen, wallet, connect]);
   const address = publicKey?.toBase58();
-  return <details className="wallet-menu"><summary className="button glass"><Wallet size={15}/>{address ? `${address.slice(0,4)}…${address.slice(-4)}` : "Connect wallet"}</summary>
+  return <details className="wallet-menu"><summary className="button glass"><Wallet size={15}/><span>{address ? `${address.slice(0,4)}…${address.slice(-4)}` : "Connect wallet"}</span></summary>
     <div className="wallet-pop"><strong>Solana wallet</strong><p>Wallet connection is optional in demo mode.</p>{address && <p className="break-all select-all font-mono" title="Solana public address">{address}</p>}
       {connected ? <button className="button glass" onClick={() => void disconnect().catch(() => setError("Could not disconnect."))}>Disconnect</button> :
         wallets.filter(w => w.readyState === "Installed" || w.readyState === "Loadable").map(w => <button className="button glass" key={w.adapter.name} disabled={connecting} onClick={() => {setError(""); setChosen(w.adapter.name); select(w.adapter.name);}}>{w.adapter.name}</button>)}
@@ -157,7 +157,7 @@ export function Workspace({children, account}: {children: React.ReactNode; accou
         {account ? <details className="wallet-menu account-menu">
           <summary className="button glass" aria-label={`Account menu for ${account.name}`}>
             {account.image?.startsWith("https://") && <img src={account.image} alt="" width={22} height={22} referrerPolicy="no-referrer"/>}
-            <span>{account.name}</span>
+            <span title={account.name}>{account.name}</span>
           </summary>
           <div className="wallet-pop">
             <Link className="text-link" href="/settings">Settings</Link>
