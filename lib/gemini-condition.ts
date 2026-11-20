@@ -10,7 +10,20 @@ export type MarketChoice = {
   side: Side;
 };
 
-export const marketPreviewMessage = "Market conditions are preview-only in this demo.";
+const previewExpiry = new Intl.DateTimeFormat("en-US", {
+  dateStyle: "medium", timeStyle: "long", timeZone: "UTC",
+});
+
+export function describeMarketPreview(condition: string, selected?: MarketChoice) {
+  if (selected) {
+    const expiry = new Date(selected.expiryDate);
+    const timing = Number.isFinite(expiry.getTime()) ? ` It expires ${previewExpiry.format(expiry)}.` : "";
+    return `“${selected.title}” is available to preview.${timing} This demo can’t fund a market-conditioned escrow.`;
+  }
+  const market = parseMarketCondition(condition);
+  const label = market?.next ? "the next BTC 5-minute round" : `“${market?.query || condition}”`;
+  return `I can preview ${label}. Market-conditioned funding is unavailable in this demo.`;
+}
 
 export function normalizeMarketTitle(title: string) {
   return title.normalize("NFKC").toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim();

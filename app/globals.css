@@ -424,3 +424,20 @@ button.panel-heading:hover{background:var(--light-grey)}
   .ledger-table th, .ledger-table td { padding-inline: 5px; }
   .ledger-filters button { padding-inline: 5px; }
 }
+
+.account-controls{grid-column:2;grid-row:1;display:flex;flex-wrap:wrap;justify-content:flex-end;gap:8px;min-width:0}
+.account-controls .button{font-size:12px}
+.account-menu summary span{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.account-menu img{border-radius:50%;flex:none}
+.guest-banner{padding:8px 18px;background:var(--panel);color:var(--muted);font-size:13px;text-align:center}
+.login-page{max-width:420px;min-height:100svh;display:flex;flex-direction:column;align-items:flex-start;justify-content:center;gap:18px}
+.login-page h1{margin:0}
+@media(min-width:960px){
+  .account-controls{margin-top:auto;flex-direction:column;align-items:stretch}
+  .account-controls .wallet-menu{margin:0}
+}
+@media(max-width:480px){
+  .account-controls{gap:4px;flex-direction:column;align-items:flex-end}
+  .account-controls .button{padding-inline:7px}
+  .account-menu summary span{max-width:92px}
+}

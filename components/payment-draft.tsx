@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useState, type FormEvent } from "react";
 import { money, type Draft } from "../lib/payments";
 import { defaultCondition, type DraftField, type DraftMemory } from "../lib/draft-memory";
-import {marketPreviewMessage, type MarketChoice} from "../lib/gemini-condition";
+import type {MarketChoice} from "../lib/gemini-condition";
 
 const formatExpiry = (date: string) => new Date(date).toLocaleString(undefined, {
   dateStyle: "medium", timeStyle: "long",
@@ -44,12 +44,13 @@ export function PaymentDraft({memory, highlighted, escrow, canConfirm, paused, a
 
   if (!choices && !current.amount && !current.recipient && !current.condition) return null;
   const selected = market?.selected;
+  const terms = choices?.[0] ?? current;
   return <section className="draft payment-draft" aria-label="Current payment draft">
     <h3>{current.status === "confirmed" ? "Confirmed payment" : "Payment draft"}</h3>
     <dl>
-      <div data-draft-highlight={highlighted.includes("amount")}><dt>Amount</dt><dd>{current.amount ? `${money(current.amount)} USDC` : "Amount needed"}</dd></div>
-      <div data-draft-highlight={highlighted.includes("recipient")}><dt>Recipient</dt><dd>{current.recipient || "Recipient needed"}</dd></div>
-      <div data-draft-highlight={highlighted.includes("condition")}><dt>Release condition</dt><dd>{current.condition ?? defaultCondition}</dd></div>
+      <div data-draft-highlight={highlighted.includes("amount")}><dt>Amount</dt><dd>{terms.amount ? `${money(terms.amount)} USDC` : "Amount needed"}</dd></div>
+      <div data-draft-highlight={highlighted.includes("recipient")}><dt>Recipient</dt><dd>{choices ? "Choose a recipient" : current.recipient || "Recipient needed"}</dd></div>
+      <div data-draft-highlight={highlighted.includes("condition")}><dt>Release condition</dt><dd>{terms.condition ?? defaultCondition}</dd></div>
       {selected && <>
         <div><dt>Gemini market</dt><dd>{selected.title} · {selected.label}</dd></div>
         <div><dt>Release outcome</dt><dd>{selected.side.toUpperCase()}</dd></div>
@@ -73,9 +74,9 @@ export function PaymentDraft({memory, highlighted, escrow, canConfirm, paused, a
     {market?.choices?.map(choice => <button type="button" className="button glass" key={choice.instrumentSymbol} onClick={() => chooseMarket(choice)}>
       {choice.title} · {choice.label} · {choice.instrumentSymbol} · {formatExpiry(choice.expiryDate)}
     </button>)}
-    {market && <p>{marketPreviewMessage} Ava shows Gemini quotes and the selected expiry without funding an escrow.</p>}
+    {market && <p>Market preview · Gemini quotes and expiry only.</p>}
     {selected && <p>Bid and ask were captured when this contract was selected.</p>}
-    {devnetReceipt ? <a href={devnetReceipt} className="text-link" target="_blank" rel="noreferrer">View funding transaction on Solana Explorer</a> : escrow ? <Link className="text-link" href={`/payments/${escrow}`}>View demo escrow</Link> : <>
+    {devnetReceipt ? <div className="draft-actions"><a href={devnetReceipt} className="text-link" target="_blank" rel="noreferrer">View funding transaction on Solana Explorer</a>{escrow && <Link className="text-link" href={`/payments/${escrow}`}>Open payment receipt</Link>}</div> : escrow ? <Link className="text-link" href={`/payments/${escrow}`}>View demo escrow</Link> : <>
       {editing && <form className="draft-edit" onSubmit={save}>
         <label>Amount in USDC<input autoFocus name="amount" type="number" min="0.01" max="90071992547409" step="0.01" defaultValue={current.amount && current.amount / 100}/></label>
         <label>Recipient<input name="recipient" maxLength={100} defaultValue={current.recipient}/></label>

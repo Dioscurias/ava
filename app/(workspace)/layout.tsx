@@ -1,4 +1,9 @@
 import {Workspace} from "../../components/workspace";
-export default function WorkspaceLayout({children}: {children: React.ReactNode}) {
-  return <Workspace>{children}</Workspace>;
+import {workspaceAccount} from "../../auth";
+
+export const dynamic = "force-dynamic";
+
+export default async function WorkspaceLayout({children}: {children: React.ReactNode}) {
+  const account = await workspaceAccount();
+  return <Workspace key={account?.id ?? "guest"} account={account}>{children}</Workspace>;
 }

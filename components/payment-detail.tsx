@@ -2,11 +2,11 @@
 import Link from "next/link";
 import {useState} from "react";
 import {ArrowLeft, Check, LockKeyhole} from "lucide-react";
-import {active, changeEscrow, guard, money, type Action} from "../lib/payments";
+import {active, displayCondition, guard, money, type Action} from "../lib/payments";
 import {StatusBadge, useWorkspace} from "./workspace";
 
 export function PaymentDetail({id}: {id: string}) {
-  const {state, setState, ready} = useWorkspace();
+  const {state, update, ready, saving} = useWorkspace();
   const escrow = state.escrows.find(e => e.id === id);
   const [pending, setPending] = useState<Action | null>(null);
   const [amount, setAmount] = useState("");
@@ -31,7 +31,7 @@ export function PaymentDetail({id}: {id: string}) {
     cancel:"Close this escrow and restore the held amount to your demo spending capacity."
   };
 
-  function apply(event: React.FormEvent) {
+  async function apply(event: React.FormEvent) {
     event.preventDefault();
     if (!pending || !selected) return;
     const cents = /^\d+(?:\.\d{1,2})?$/.test(amount) ? Math.round(Number(amount) * 100) : 0;
@@ -39,7 +39,11 @@ export function PaymentDetail({id}: {id: string}) {
       const issue = guard(state, cents);
       if (issue) {setError(issue); return;}
     }
-    setState(current => changeEscrow(current, id, pending, cents));
+    try { await update({type:"escrow", id, action:pending, amount:cents}); }
+    catch (error) {
+      setError(error instanceof Error ? error.message : "Could not save the escrow.");
+      return;
+    }
     setPending(null);
     setError("");
     setAmount("");
@@ -48,9 +52,9 @@ export function PaymentDetail({id}: {id: string}) {
   return <main className="app-main detail-page">
     <Link href="/activity" className="text-link back"><ArrowLeft size={15}/> Activity</Link>
     <h1>{escrow.recipient}</h1>
-    <div className="detail-grid"><section className="panel detail-card"><StatusBadge status={escrow.status}/><h2>{money(escrow.amount)} <small>USDC</small></h2><div className="condition"><LockKeyhole size={19}/><div><strong>Release condition</strong><p>{escrow.condition}</p></div></div>
-    {active(escrow) && <div className="action-list">{actions.map((action, index) => <button key={action.id} disabled={!ready} className={`button ${index === 0 && action.id === "release" ? "primary" : "glass"}`} onClick={() => {setPending(action.id); setError("");}}>{action.label}</button>)}</div>}
-    {selected && pending && <form className="action-form" onSubmit={apply}><strong>{selected.label}</strong><p>{explanations[pending]}</p>{pending === "add" && <label>Amount in USDC<input value={amount} onChange={e => setAmount(e.target.value)} inputMode="decimal" autoFocus required/></label>}{error && <p role="alert">{error}</p>}<div className="action-list"><button className="button primary">Confirm</button><button type="button" className="button glass" onClick={() => setPending(null)}>Go back</button></div></form>}</section>
+    <div className="detail-grid"><section className="panel detail-card"><StatusBadge status={escrow.status}/><h2>{money(escrow.amount)} <small>USDC</small></h2><div className="condition"><LockKeyhole size={19}/><div><strong>Release condition</strong><p>{displayCondition(escrow.condition)}</p></div></div>
+    {active(escrow) && <div className="action-list">{actions.map((action, index) => <button key={action.id} disabled={!ready || saving} className={`button ${index === 0 && action.id === "release" ? "primary" : "glass"}`} onClick={() => {setPending(action.id); setError("");}}>{action.label}</button>)}</div>}
+    {selected && pending && <form className="action-form" onSubmit={apply}><strong>{selected.label}</strong><p>{explanations[pending]}</p>{pending === "add" && <label>Amount in USDC<input value={amount} onChange={e => setAmount(e.target.value)} inputMode="decimal" autoFocus required/></label>}{error && <p role="alert">{error}</p>}<div className="action-list"><button className="button primary" disabled={saving}>Confirm</button><button type="button" className="button glass" onClick={() => setPending(null)}>Go back</button></div></form>}</section>
     <section className="panel detail-card timeline"><h3>Timeline</h3><ol>{escrow.events.map((event,index) => <li key={index}><Check size={15}/><div><strong>{event.label}</strong><time dateTime={event.at}>{new Intl.DateTimeFormat("en-US",{dateStyle:"medium",timeStyle:"short",timeZone:"UTC"}).format(new Date(event.at))} UTC</time></div></li>)}</ol></section></div>
   </main>;
 }

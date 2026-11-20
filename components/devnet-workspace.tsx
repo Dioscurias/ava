@@ -1,14 +1,15 @@
 "use client";
+import {displayCondition} from "../lib/payments";
 import {StreamTimeline} from "./stream-timeline";
 
 import Link from "next/link";
 import {JudgeDevnet} from "./judge-devnet";
 import {useConnection, useWallet} from "@solana/wallet-adapter-react";
 import {useEffect, useRef, useState} from "react";
-import type {Transaction} from "@solana/web3.js";
+import {PublicKey, type Transaction} from "@solana/web3.js";
 import {
   configurePolicy, confirmDevnetTransaction, describeEscrow, devnetProgram, explorer, fetchDevnet,
-  formatBaseUnits, fundEscrow, manageEscrow, parseLiveInstruction, toBaseUnits,
+  escrowAddress, formatBaseUnits, fundEscrow, manageEscrow, parseLiveInstruction, timedPaymentPath, toBaseUnits,
   type LiveDraft, type LiveEscrow, type LiveSnapshot,
 } from "../lib/devnet";
 
@@ -29,6 +30,10 @@ export function DevnetWorkspace() {
   const busyRef = useRef(false);
   const [instruction, setInstruction] = useState("");
   const [draft, setDraft] = useState<LiveDraft | null>(null);
+  const [deadline, setDeadline] = useState("");
+  const [reviewSeconds, setReviewSeconds] = useState("60");
+  const [arbiterAddress, setArbiterAddress] = useState("");
+  const [fundedPath, setFundedPath] = useState("");
   const [limit, setLimit] = useState("");
   const address = owner?.toBase58();
   const policy = snapshot?.policy;
@@ -38,6 +43,8 @@ export function DevnetWorkspace() {
     setDraft(null);
     setInstruction("");
     setSignature("");
+    setFundedPath("");
+    setArbiterAddress("");
     setMessage("");
   }, [address]);
 
@@ -98,7 +105,14 @@ export function DevnetWorkspace() {
     if (!owner) return;
     setDraft(null);
     try {
-      setDraft(parseLiveInstruction(instruction, owner));
+      const next = parseLiveInstruction(instruction, owner);
+      const defaultDeadline = new Date(next.terms?.deliveryDeadline ? next.terms.deliveryDeadline * 1000 : Date.now() + 7 * 86400_000);
+      defaultDeadline.setMinutes(defaultDeadline.getMinutes() - defaultDeadline.getTimezoneOffset());
+      setDeadline(defaultDeadline.toISOString().slice(0, 16));
+      setReviewSeconds(String(next.terms?.reviewWindowSecs ?? 60));
+      setArbiterAddress("");
+      setFundedPath("");
+      setDraft(next);
       setMessage("");
     } catch (error) {setMessage(message(error));}
   }
@@ -110,7 +124,26 @@ export function DevnetWorkspace() {
       setMessage("The draft exceeds your Devnet balance or remaining spending limit.");
       return;
     }
-    if (await execute(() => fundEscrow(program, owner, draft), "USDC is now in on-chain escrow.")) {
+    const deliveryDeadline = Math.floor(new Date(deadline).getTime() / 1000);
+    const reviewWindowSecs = Number(reviewSeconds);
+    const now = Math.floor(Date.now() / 1000);
+    if (!Number.isFinite(deliveryDeadline) || deliveryDeadline <= now || deliveryDeadline > now + 365 * 86400) {
+      return setMessage("Choose a delivery deadline within the next year.");
+    }
+    if (!Number.isInteger(reviewWindowSecs) || reviewWindowSecs < 1 || reviewWindowSecs > 30 * 86400) {
+      return setMessage("Set a review window between one second and 30 days.");
+    }
+    let arbiter: PublicKey | null = null;
+    if (arbiterAddress.trim()) {
+      try { arbiter = new PublicKey(arbiterAddress.trim()); }
+      catch { return setMessage("Enter a valid arbiter wallet address."); }
+      if (!PublicKey.isOnCurve(arbiter.toBytes()) || arbiter.equals(owner) || arbiter.equals(draft.recipient)) {
+        return setMessage("Choose an independent arbiter wallet.");
+      }
+    }
+    const timedDraft = {...draft, terms:{deliveryDeadline, reviewWindowSecs, arbiter}};
+    if (await execute(() => fundEscrow(program, owner, timedDraft), "USDC is now in on-chain escrow.")) {
+      setFundedPath(timedPaymentPath(escrowAddress(program, owner, draft.nonce)));
       setDraft(null);
       setInstruction("");
     }
@@ -162,7 +195,7 @@ export function DevnetWorkspace() {
         </section>
         <section>
           <h2>Draft a payment</h2>
-          <p>For example, “Hold 1 USDC for [wallet address] until I receive the files.” The amount, recipient, and condition are public on Devnet.</p>
+          <p>For example, “Hold 1 USDC for [wallet address] until I receive the files, give them 3 days to review.” The amount, recipient, and condition are public on Devnet.</p>
           <form className="composer" onSubmit={preview}>
             <input aria-label="Devnet payment instruction" maxLength={360} value={instruction} onChange={event => {setInstruction(event.target.value); setDraft(null);}} required/>
             <button className="button primary" disabled={outstanding}>Review</button>
@@ -171,6 +204,14 @@ export function DevnetWorkspace() {
             <strong>{formatBaseUnits(draft.amount)} test USDC</strong>
             <p className="wrap-address">Recipient: {draft.recipient.toBase58()}</p>
             <p>Release condition: {draft.condition}</p>
+            <div className="settings-form">
+              <label>Delivery deadline (local time)<input type="datetime-local" value={deadline} onChange={event => setDeadline(event.target.value)}/></label>
+              <label>Review window in seconds<input type="number" min="1" max="2592000" step="1" value={reviewSeconds} onChange={event => setReviewSeconds(event.target.value)}/></label>
+              <label>Arbiter wallet (optional)<input value={arbiterAddress} onChange={event => setArbiterAddress(event.target.value)} spellCheck={false}/></label>
+            </div>
+            <p>Recipient can claim after the {Number(reviewSeconds).toLocaleString()}-second review window if you don’t respond. The window starts when they mark delivery.</p>
+            {deadline && <p>Refund available if delivery isn’t marked by {new Date(deadline).toLocaleString()}.</p>}
+            <p>A dispute requires an independent arbiter selected before funding.</p>
             <button className="button primary" type="button" disabled={outstanding || !funding || paused} onClick={() => void fund()}>Fund on Devnet</button>
             {(!funding || paused) && <p>Enable funding and resume the on-chain policy to continue.</p>}
           </div>}
@@ -180,14 +221,14 @@ export function DevnetWorkspace() {
           {snapshot && !snapshot.outgoing.length && <p>No outgoing Devnet escrows.</p>}
           {snapshot?.outgoing.map(escrow => <article key={escrow.key.toBase58()} className="devnet-escrow">
             <strong>{formatBaseUnits(escrow.amount)} USDC · {describeEscrow(escrow)}</strong>
-            <p className="wrap-address">Recipient: {escrow.recipient.toBase58()}</p><p>{escrow.condition}</p>
+            <p className="wrap-address">Recipient: {escrow.recipient.toBase58()}</p><p>{displayCondition(escrow.condition)}</p>
             <a className="text-link" href={explorer("address",escrow.key.toBase58())} target="_blank" rel="noreferrer">View on Solana Explorer</a>
             <StreamTimeline escrow={escrow.key.toBase58()}/>
-            <div className="action-list">
+            {escrow.terms ? <p><Link className="text-link" href={timedPaymentPath(escrow.key)}>Open escrow and delivery timeline</Link></p> : <div className="action-list">
               {escrow.status === 1 && <button className="button glass" disabled={outstanding || paused} onClick={() => manage(escrow,"attest")}>Attest condition met</button>}
               {escrow.status === 2 && <button className="button primary" disabled={outstanding || paused || !releases} onClick={() => manage(escrow,"release")}>Release test USDC</button>}
               {escrow.status < 3 && <button className="button glass" disabled={outstanding} onClick={() => manage(escrow,"cancel")}>Cancel escrow</button>}
-            </div>
+            </div>}
           </article>)}
         </section>
         <section>
@@ -195,14 +236,15 @@ export function DevnetWorkspace() {
           {snapshot && !snapshot.incoming.length && <p>No incoming Devnet escrows.</p>}
           {snapshot?.incoming.map(escrow => <article key={escrow.key.toBase58()} className="devnet-escrow">
             <strong>{formatBaseUnits(escrow.amount)} USDC · {describeEscrow(escrow)}</strong>
-            <p>{escrow.condition}</p>
+            <p>{displayCondition(escrow.condition)}</p>
+            {escrow.terms && <p><Link className="text-link" href={timedPaymentPath(escrow.key)}>Open escrow and delivery timeline</Link></p>}
             <a className="text-link" href={explorer("address",escrow.key.toBase58())} target="_blank" rel="noreferrer">View on Solana Explorer</a>
             <StreamTimeline escrow={escrow.key.toBase58()}/>
           </article>)}
         </section>
       </>}
     {(messageText || signature) && <div className="devnet-notice" role="status">
-      <p>{messageText}</p>{signature && <a className="text-link" href={explorer("tx",signature)} target="_blank" rel="noreferrer">View transaction</a>}
+      <p>{messageText}</p>{fundedPath && <p><Link className="text-link" href={fundedPath}>Open funded escrow</Link></p>}{signature && <a className="text-link" href={explorer("tx",signature)} target="_blank" rel="noreferrer">View transaction</a>}
     </div>}
   </main>;
 }

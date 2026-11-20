@@ -9,6 +9,7 @@ import {redis, redisEnabled} from "./stream-events.server";
 export const judgeAmount = 100_000n;
 const judgeSpendingCap = 5_000_000n;
 const dailyEscrows = 10;
+const hourlyEscrowsPerIp = 3;
 const solReserve = 20_000_000;
 const actions = {fund:1, attest:2, release:3, cancel:4} as const;
 export type JudgeAction = keyof typeof actions;
@@ -17,7 +18,7 @@ export class JudgeError extends Error {
 }
 
 function signer(role: "PAYER" | "RECIPIENT") {
-  const value = process.env[`AVA_JUDGE_${role}_KEYPAIR`];
+  const value = (role === "PAYER" ? process.env.JUDGE_PAYER_SECRET_KEY : undefined) || process.env[`AVA_JUDGE_${role}_KEYPAIR`];
   const file = process.env[`AVA_JUDGE_${role}_KEYPAIR_PATH`];
   if (!value && !file) return null;
   try {
@@ -29,19 +30,19 @@ function signer(role: "PAYER" | "RECIPIENT") {
 }
 
 function recipientAddress() {
-  const value = process.env.AVA_JUDGE_RECIPIENT_ADDRESS;
+  const value = process.env.JUDGE_RECIPIENT_PUBKEY || process.env.AVA_JUDGE_RECIPIENT_ADDRESS;
   try {return value ? new PublicKey(value) : signer("RECIPIENT")?.publicKey ?? null;}
   catch {throw new JudgeError("The judge recipient address is invalid.",503);}
 }
 
 function programAddress() {
-  const value = process.env.AVA_DEVNET_PROGRAM || process.env.NEXT_PUBLIC_AVA_DEVNET_PROGRAM;
+  const value = process.env.ESCROW_PROGRAM_ID || process.env.AVA_DEVNET_PROGRAM || process.env.NEXT_PUBLIC_AVA_DEVNET_PROGRAM;
   try {return value ? new PublicKey(value) : null;}
   catch {throw new JudgeError("The configured escrow program address is invalid.",503);}
 }
 
 function rpcConnection() {
-  return new Connection(process.env.AVA_DEVNET_RPC_URL || clusterApiUrl("devnet"),"confirmed");
+  return new Connection(process.env.SOLANA_RPC_URL || process.env.AVA_DEVNET_RPC_URL || clusterApiUrl("devnet"),"confirmed");
 }
 
 async function assertNetwork(connection: Connection, program: PublicKey) {
@@ -128,23 +129,30 @@ async function findSignature(connection: Connection, program: PublicKey, escrow:
   throw new JudgeError("The escrow updated, but its transaction history is not available yet. Retry shortly.",503);
 }
 
-async function reserveDailyEscrow(sponsor: string, requestId: string) {
-  if (!redisEnabled()) throw new JudgeError("The judge daily cap is not configured.",503);
-  const day = new Date().toISOString().slice(0,10);
-  let accepted: number;
+async function reserveJudgeEscrow(sponsor: string, requestId: string, clientIp: string) {
+  if (!redisEnabled()) throw new JudgeError("The judge rate limits are not configured.",503);
+  const hour = new Date().toISOString().slice(0,13);
+  const ipHash = createHash("sha256").update(clientIp).digest("hex");
+  const key = `ava:judge:quota:{${sponsor}}`;
+  let result: number;
   try {
-    accepted = await redis<number>("EVAL", `
+    result = await redis<number>("EVAL", `
       if redis.call('sismember', KEYS[1], ARGV[1]) == 1 then return 1 end
-      if redis.call('scard', KEYS[1]) >= tonumber(ARGV[2]) then return 0 end
+      if redis.call('scard', KEYS[1]) >= tonumber(ARGV[2]) then return -1 end
+      if redis.call('scard', KEYS[2]) >= tonumber(ARGV[3]) then return -2 end
       redis.call('sadd', KEYS[1], ARGV[1])
       redis.call('expire', KEYS[1], 172800)
+      redis.call('sadd', KEYS[2], ARGV[1])
+      redis.call('expire', KEYS[2], 7200)
       return 1
-    `,1,`ava:judge:quota:${sponsor}:${day}`,requestId,dailyEscrows);
-  } catch {throw new JudgeError("The daily cap could not be checked. Try again shortly.",503);}
-  if (accepted !== 1) throw new JudgeError("The judge sponsor has reached its 1.00 USDC daily cap.",429);
+    `,2,`${key}:day:${hour.slice(0,10)}`,`${key}:ip:${ipHash}:${hour}`,requestId,dailyEscrows,hourlyEscrowsPerIp);
+  } catch {throw new JudgeError("The judge rate limits could not be checked. Try again shortly.",503);}
+  if (result === -2) throw new JudgeError("This connection has reached its three-run hourly limit.",429);
+  if (result === -1) throw new JudgeError("The judge sponsor has reached its 1.00 USDC daily cap.",429);
+  if (result !== 1) throw new JudgeError("The judge rate limits could not be checked.",503);
 }
 
-export async function runJudgeAction(action: JudgeAction, payload: unknown, connection = rpcConnection(), scheduleFallback?: (signature: string, at: number) => void, reserve = reserveDailyEscrow) {
+export async function runJudgeAction(action: JudgeAction, payload: unknown, connection = rpcConnection(), scheduleFallback?: (signature: string, at: number) => void, reserve = reserveJudgeEscrow, clientIp = "local") {
   if (!payload || typeof payload !== "object") throw new JudgeError("Expected a JSON request.",400);
   const values = payload as Record<string,unknown>;
   const program = programAddress();
@@ -185,7 +193,7 @@ export async function runJudgeAction(action: JudgeAction, payload: unknown, conn
         tx.add(configurePolicy(program,payer.publicKey,judgeSpendingCap,3));
       }
       tx.add(fundEscrow(program,payer.publicKey,{recipient:recipient,amount:judgeAmount,condition,nonce}));
-      await reserve(payer.publicKey.toBase58(),values.requestId);
+      await reserve(payer.publicKey.toBase58(),values.requestId,clientIp);
       signature = await submit(connection,payer,tx,scheduleFallback);
     }
   } else {

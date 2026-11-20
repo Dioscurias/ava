@@ -12,10 +12,10 @@ import {
   getAssociatedTokenAddressSync, MintLayout, TOKEN_PROGRAM_ID,
 } from "@solana/spl-token";
 import {
-  ComputeBudgetProgram, Connection, Keypair, Transaction,
+  ComputeBudgetProgram, Connection, Keypair, SYSVAR_CLOCK_PUBKEY, Transaction,
 } from "@solana/web3.js";
 import {
-  configurePolicy, devnetMint, fetchDevnet, fundEscrow, manageEscrow, parseLiveInstruction,
+  configurePolicy, devnetMint, fetchDevnet, fundEscrow, manageEscrow, manageTimedEscrow, parseLiveInstruction, escrowAddress, storedEscrow,
 } from "../lib/devnet";
 
 async function main() {
@@ -69,13 +69,13 @@ async function main() {
       assert((await connection.getAccountInfo(address))?.executable,`Missing executable account ${address}`);
     }
     let attempt = 0;
-    const send = async (tx: Transaction) => {
+    const send = async (tx: Transaction, ...signers: Keypair[]) => {
       // Distinct signatures let us test protocol replays within one blockhash window.
       tx.instructions.unshift(ComputeBudgetProgram.setComputeUnitPrice({microLamports:++attempt}));
       const block = await connection.getLatestBlockhash("confirmed");
       tx.recentBlockhash = block.blockhash;
       tx.feePayer = payer.publicKey;
-      tx.sign(payer);
+      tx.sign(payer, ...signers);
       const signature = await connection.sendRawTransaction(tx.serialize(),{preflightCommitment:"confirmed"});
       for (let check=0;check<40;check++) {
         const {value:[status]} = await connection.getSignatureStatuses([signature]);
@@ -160,6 +160,83 @@ async function main() {
     assert.equal((await getAccount(connection,recipientAccount)).amount,2_100_000n);
     assert.equal((await getAccount(connection,source)).amount,17_900_000n);
     console.log("Sponsored judge flows passed: confirmed release and refund, capability enforcement, Explorer receipts, idempotent retry.");
+    const arbiter = Keypair.generate();
+    const chainTime = async () => Number((await connection.getAccountInfo(SYSVAR_CLOCK_PUBKEY))!.data.readBigInt64LE(32));
+    const waitPast = async (time: number) => {
+      for (let i = 0; i < 120; i++) {
+        if (await chainTime() >= time) return;
+        await delay(250);
+      }
+      throw Error("Local validator clock did not advance.");
+    };
+    const readTimed = async (key: typeof recipient) => storedEscrow(key, (await connection.getAccountInfo(key))!.data);
+    const timed = async (deliveryDeadline: number, reviewWindowSecs: number, withArbiter = true) => {
+      const parsed = parseLiveInstruction(`Hold 0.10 USDC for ${recipient} until files arrive, give them 3 days to review.`, payer.publicKey);
+      assert.equal(parsed.terms?.reviewWindowSecs, 259200);
+      assert.equal(parsed.condition, "files arrive");
+      const next = {...parsed, terms:{deliveryDeadline, reviewWindowSecs, arbiter:withArbiter ? arbiter.publicKey : null}};
+      await send(fundEscrow(program, payer.publicKey, next));
+      return readTimed(escrowAddress(program,payer.publicKey,next.nonce));
+    };
+    const payerAction = (escrow: Awaited<ReturnType<typeof timed>>, action: "refund" | "dispute" | "resolveRelease") =>
+      send(manageTimedEscrow(program, payer.publicKey, escrow, action));
+    const recipientAction = (escrow: Awaited<ReturnType<typeof timed>>, action: "deliver" | "claim") =>
+      send(manageTimedEscrow(program, recipient, escrow, action),recipientSigner);
+
+    await send(configurePolicy(program,payer.publicKey,10_000_000n,3));
+    const beforeRecipient = (await getAccount(connection,recipientAccount)).amount;
+    const beforePayer = (await getAccount(connection,source)).amount;
+    const beforeCommitted = (await fetchDevnet(connection,program,payer.publicKey)).policy!.committed;
+    const timeout = await timed(await chainTime() + 90, 8);
+    const neverDelivered = await timed(await chainTime() + 8, 60);
+    assert.equal((await fetchDevnet(connection,program,recipient)).incoming.find(x => x.key.equals(timeout.key))?.terms?.reviewWindowSecs,8);
+    await assert.rejects(payerAction(neverDelivered,"refund"), /error: 0xc\b/);
+    await assert.rejects(send(manageTimedEscrow(program,payer.publicKey,timeout,"deliver")), /error: 0xb\b/);
+    await recipientAction(timeout,"deliver");
+    const delivered = await readTimed(timeout.key);
+    assert.equal(delivered.status,5);
+    await assert.rejects(recipientAction(timeout,"claim"), /error: 0xc\b/);
+    await assert.rejects(payerAction(timeout,"refund"), /error: 0xe\b/);
+    // The payer cannot block a recipient claim by pausing the agent.
+    await send(configurePolicy(program,payer.publicKey,10_000_000n,7));
+    await waitPast(Math.max(delivered.terms!.deliveredAt! + 8, neverDelivered.terms!.deliveryDeadline + 1));
+    await assert.rejects(payerAction(timeout,"dispute"), /error: 0xd\b/);
+    await recipientAction(timeout,"claim");
+    assert.equal((await readTimed(timeout.key)).status,3);
+    await assert.rejects(recipientAction(timeout,"claim"), /error: 0xe\b/);
+    await assert.rejects(recipientAction(neverDelivered,"deliver"), /error: 0xd\b/);
+    await payerAction(neverDelivered,"refund");
+    assert.equal((await readTimed(neverDelivered.key)).status,4);
+    await send(configurePolicy(program,payer.publicKey,10_000_000n,3));
+    const noArbiter = await timed(await chainTime() + 90, 60, false);
+    await recipientAction(noArbiter,"deliver");
+    await assert.rejects(payerAction(noArbiter,"dispute"), /error: 0xf\b/);
+    await send(manageEscrow(program,payer.publicKey,noArbiter,"release"));
+    const undelivered = await timed(await chainTime() + 90, 60);
+    await send(manageEscrow(program,payer.publicKey,undelivered,"release"));
+    assert.equal((await readTimed(undelivered.key)).status,3);
+    for (const release of [true,false]) {
+      const held = await timed(await chainTime() + 90,60);
+      await recipientAction(held,"deliver");
+      await payerAction(held,"dispute");
+      assert.equal((await readTimed(held.key)).terms?.disputed,true);
+      await assert.rejects(payerAction(held,"resolveRelease"), /error: 0xb\b/);
+      await assert.rejects(recipientAction(held,"claim"), /error: 0xe\b/);
+      await assert.rejects(send(manageEscrow(program,payer.publicKey,held,"release")), /error: 0xe\b/);
+      await assert.rejects(send(manageEscrow(program,payer.publicKey,held,"cancel")), /error: 0xe\b/);
+      const resolution = manageTimedEscrow(program,arbiter.publicKey,held,release ? "resolveRelease" : "resolveRefund");
+      const redirected = await timed(await chainTime() + 90,60);
+      resolution.instructions.at(-1)!.keys[5].pubkey = redirected.vault;
+      await assert.rejects(send(resolution,arbiter));
+      await send(manageTimedEscrow(program,arbiter.publicKey,held,release ? "resolveRelease" : "resolveRefund"),arbiter);
+      assert.equal((await readTimed(held.key)).status,release ? 3 : 4);
+      assert.equal((await getAccount(connection,held.vault)).amount,0n);
+      await send(manageEscrow(program,payer.publicKey,redirected,"release"));
+    }
+    assert.equal((await getAccount(connection,recipientAccount)).amount,beforeRecipient + 600_000n);
+    assert.equal((await getAccount(connection,source)).amount,beforePayer - 600_000n);
+    assert.equal((await fetchDevnet(connection,program,payer.publicKey)).policy?.committed,beforeCommitted + 600_000n);
+    console.log("Timed flows passed: delivery, timeout claim, deadline refund, early release, dispute freeze and both arbiter outcomes.");
     // Allow web3.js to close the last subscription before stopping the validator.
     await delay(700);
   } finally {

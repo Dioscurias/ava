@@ -1,3 +1,4 @@
+import { describeMarketPreview } from "../lib/gemini-condition";
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import btc from "../docs/gemini-samples/btc05m-active.json";
@@ -74,4 +75,14 @@ test("matching titles keep different contract expiries or tenors selectable", ()
   const other = {...btc, ticker: "other-market", contracts: [{...btc.contracts[0], instrumentSymbol:"other-instrument"}]};
   const result = matchMarkets([btc, other], `if ${btc.title} · Up resolves yes`, now);
   assert.deepEqual(result.map(choice => choice.instrumentSymbol), [btc.contracts[0].instrumentSymbol, "other-instrument"]);
+});
+
+test("market replies describe the requested or selected contract and expiry", () => {
+  const condition = "The next BTC 5-minute round settles down";
+  const [selected] = matchMarkets([btc], condition, now);
+  const preview = describeMarketPreview(condition, selected);
+  assert.ok(preview.includes(selected.title));
+  assert.match(preview, /expires .+UTC/);
+  assert.match(preview, /preview/i);
+  assert.notEqual(preview, describeMarketPreview(condition));
 });

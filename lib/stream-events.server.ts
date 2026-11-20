@@ -3,7 +3,7 @@ import { devnetGenesis } from "./devnet";
 
 
 export const signaturePattern = /^[1-9A-HJ-NP-Za-km-z]{64,88}$/;
-const kinds = [null, "fund", "attest", "release", "cancel"] as const;
+const kinds = [null, "fund", "attest", "release", "cancel", "fund", "deliver", "claim", "refund", "dispute"] as const;
 const alphabet = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
 const prefix = "ava:devnet:stream:";
 const expiry = 60 * 60 * 24 * 30;
@@ -27,7 +27,7 @@ export async function redis<T>(...command: (string | number)[]): Promise<T> {
 }
 
 export function eventRpc() {
-  return new Connection(process.env.AVA_DEVNET_RPC_URL || clusterApiUrl("devnet"), {
+  return new Connection(process.env.SOLANA_RPC_URL || process.env.AVA_DEVNET_RPC_URL || clusterApiUrl("devnet"), {
     commitment: "confirmed",
     disableRetryOnRateLimit: true,
     fetch: (url, init) => fetch(url, {...init, signal: AbortSignal.timeout(5_000)}),
@@ -72,7 +72,7 @@ export async function recordSignature(signature: string, source: "stream" | "rpc
     const events = [...tx.transaction.message.instructions, ...(tx.meta.innerInstructions ?? []).flatMap(group => group.instructions)].flatMap(ix => {
       if (!ix.programId.equals(program) || !("data" in ix) || ix.accounts.length < 3) return [];
       const data = decodeInstruction(ix.data);
-      const kind = kinds[data[0]];
+      const kind = data[0] === 10 ? (data[9] === 1 ? "resolveRelease" : "resolveRefund") : kinds[data[0]];
       if (!kind || data.length < 9) return [];
       const [payer, , escrow] = ix.accounts;
       const [expected] = PublicKey.findProgramAddressSync([Buffer.from("escrow"), payer.toBuffer(), data.subarray(1, 9)], program);

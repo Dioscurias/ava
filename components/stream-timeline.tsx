@@ -2,8 +2,8 @@
 
 import { useEffect, useState } from "react";
 
-type Event = {kind: "fund" | "attest" | "release" | "cancel"; signature: string; source?: "stream" | "rpc"; latencyMs: number | null};
-const labels = {fund: "Funded", attest: "Condition attested", release: "Released", cancel: "Cancelled"};
+type Event = {kind: keyof typeof labels; signature: string; source?: "stream" | "rpc"; latencyMs: number | null};
+const labels = {fund: "Funded", attest: "Condition attested", release: "Released", cancel: "Cancelled", deliver:"Delivery marked", claim:"Claimed by recipient", refund:"Deadline refund", dispute:"Disputed", resolveRelease:"Dispute resolved with release", resolveRefund:"Dispute resolved with refund"};
 
 function useStream(escrow?: string) {
   const [result, setResult] = useState<{healthy: boolean; events: Event[]}>({healthy: false, events: []});

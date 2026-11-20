@@ -88,3 +88,13 @@ export function conditionOutcome(escrow: Escrow): "Met" | "Pending" | "Unmet" {
   }
   return escrow.status === "Cancelled" ? "Unmet" : "Pending";
 }
+
+export function displayCondition(condition: string) {
+  const value = condition.trim();
+  return value.replace(/^I (approve|accept|confirm|receive|verify|sign|review|acknowledge|deliver|submit|check|finish|complete|can|have|am|do)\b/i,
+    (_, verb: string) => {
+      const action = verb.toLowerCase();
+      const irregular: Record<string, string> = {can: "can", have: "has", am: "is", do: "does", finish: "finishes"};
+      return `Payer ${irregular[action] ?? `${action}s`}`;
+    });
+}

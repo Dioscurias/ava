@@ -119,7 +119,7 @@ test("planned amounts must match a literal or spoken amount in the request", () 
 test("a short known name needs confirmation before the draft is ready", () => {
   const draft = turn("Hold 75 USDC for Maya until I approve the design files").memory;
   const suggestion = resolveKnownRecipient(emptyDraft, draft, ["Maya Chen", "maya chen", "Bob"]);
-  expect(suggestion?.reply).toMatch(/^Maya Chen\?$/i);
+  expect(suggestion?.reply).toBe("Do you mean Maya Chen?");
   expect(readyDraft(suggestion!.memory)).toBeNull();
   expect(readyDraft(turn("yes", suggestion!.memory).memory)).toEqual({
     amount: 7500, recipient: "Maya Chen", condition: "Payer approves the design files",
@@ -130,4 +130,14 @@ test("a short known name needs confirmation before the draft is ready", () => {
 test("market conditions start with a capital letter", () => {
   expect(turn("Pay Maya 20 USDC until the next BTC 5-minute round settles up").memory.current.condition)
     .toBe("The next BTC 5-minute round settles up");
+});
+
+test("partial recipient prefixes need approval and cannot be confirmed after undo", () => {
+  const draft = turn("Hold 75 USDC for mAYa Ch").memory;
+  const suggestion = resolveKnownRecipient(emptyDraft, draft, ["Maya Chen"])!;
+  expect(suggestion.reply).toBe("Do you mean Maya Chen?");
+  expect(readyDraft(turn("yes", suggestion.memory).memory)?.recipient).toBe("Maya Chen");
+  expect(readyDraft(turn("undo", suggestion.memory).memory)).toBeNull();
+  expect(readyDraft(turn("no", suggestion.memory).memory)).toBeNull();
+  expect(turn("no", suggestion.memory).reply).toBe("Who should I pay?");
 });

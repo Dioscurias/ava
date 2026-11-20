@@ -1,6 +1,6 @@
 import {test} from "node:test";
 import assert from "node:assert/strict";
-import {parsePayment, guard, committed, initial, changeEscrow, conditionOutcome} from "../lib/payments.ts";
+import {parsePayment, guard, committed, initial, changeEscrow, conditionOutcome, displayCondition} from "../lib/payments.ts";
 
 test("extracts a conditional payment and requires a recognizable amount and recipient", () => {
   assert.deepEqual(parsePayment("Send 250 USDC to Maya when she delivers the files."), {
@@ -75,4 +75,10 @@ test("the simulation workspace minimum counts active escrows only", () => {
   const after = changeEscrow(initial, pending.id, "release");
   assert.equal(committed(after), 12_500);
   assert.equal(guard({...after, limit: 12_600}, 100), null);
+});
+
+test("older escrow conditions use payer language at display time", () => {
+  assert.equal(displayCondition("I approve the design files"), "Payer approves the design files");
+  assert.equal(displayCondition("Payer approves the design files"), "Payer approves the design files");
+  assert.equal(displayCondition("Maya confirms that I approve"), "Maya confirms that I approve");
 });

@@ -1,5 +1,5 @@
 import {parseMarketCondition} from "./gemini-condition";
-import {money, parsePayment, type Draft} from "./payments";
+import {displayCondition, money, parsePayment, type Draft} from "./payments";
 
 export const defaultCondition = "You confirm the release";
 export type DraftField = keyof Draft;
@@ -77,12 +77,7 @@ function ambiguous(patch: Partial<Draft>) {
 function neutralCondition(condition: string) {
   const value = condition.trim();
   if (parseMarketCondition(value)) return value.charAt(0).toUpperCase() + value.slice(1);
-  return value.replace(/^I (approve|accept|confirm|receive|verify|sign|review|acknowledge|deliver|submit|check|finish|complete|can|have|am|do)\b/i,
-    (_, verb: string) => {
-      const action = verb.toLowerCase();
-      const irregular: Record<string, string> = {can: "can", have: "has", am: "is", do: "does", finish: "finishes"};
-      return `Payer ${irregular[action] ?? `${action}s`}`;
-    });
+  return displayCondition(value);
 }
 
 export function resolveKnownRecipient(before: DraftMemory, next: DraftMemory, names: string[]) {
@@ -93,12 +88,17 @@ export function resolveKnownRecipient(before: DraftMemory, next: DraftMemory, na
     const key = name.trim().toLowerCase();
     if (!known.has(key)) known.set(key, name.trim());
   }
-  if (known.has(recipient)) return null;
-  const matches = [...known].filter(([name]) => name.startsWith(`${recipient} `)).map(([, name]) => name);
+  const exact = known.get(recipient);
+  if (exact) {
+    if (exact === next.current.recipient) return null;
+    const memory = {...next, current: {...next.current, recipient: exact}};
+    return {memory, reply: describeDraftChange(before, memory)};
+  }
+  const matches = [...known].filter(([name]) => name.startsWith(recipient)).map(([, name]) => name);
   if (!matches.length) return null;
   return {
-    memory: {...next, choices: matches.map(name => ({...next.current, recipient: name}))},
-    reply: matches.length === 1 ? `${matches[0]}?` : "Which recipient should I use?",
+    memory: {...before, choices: matches.map(name => ({...next.current, recipient: name}))},
+    reply: matches.length === 1 ? `Do you mean ${matches[0]}?` : "Which recipient should I use?",
   };
 }
 
@@ -167,6 +167,10 @@ export function draftTurn(memory: DraftMemory, input: string): {memory: DraftMem
     return {memory: next, reply: "I restored the previous draft."};
   }
   if (memory.choices) {
+    if (memory.choices.length === 1 && /^(?:no|nope)$/i.test(text)) {
+      const {amount, condition} = memory.choices[0];
+      return {memory: editDraft(memory, {amount, condition, recipient: undefined}), reply: "Who should I pay?"};
+    }
     const singleMatchAccepted = memory.choices.length === 1 && /^(?:yes|yes,? that(?:'s| is) right|correct)$/i.test(text);
     const index = singleMatchAccepted ? 0 : memory.choices.findIndex(choice => choice.recipient?.toLowerCase() === text.toLowerCase());
     if (index >= 0) {

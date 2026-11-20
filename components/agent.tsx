@@ -9,8 +9,8 @@ import {useWallet} from "@solana/wallet-adapter-react";
 import {useCallback, useEffect, useLayoutEffect, useRef, useState} from "react";
 import {motion, useReducedMotion} from "framer-motion";
 import {ArrowRight, ArrowUp, AudioLines, ChevronDown, LockKeyhole, Mic, ShieldCheck} from "lucide-react";
-import {active, addEscrow, committed, demoInstruction, guard, money, type Draft} from "../lib/payments";
-import {marketPreviewMessage, parseMarketCondition, type MarketChoice} from "../lib/gemini-condition";
+import {active, committed, demoInstruction, displayCondition, guard, money, type Draft} from "../lib/payments";
+import {describeMarketPreview, parseMarketCondition, type MarketChoice} from "../lib/gemini-condition";
 import {JudgeDevnet} from "./judge-devnet";
 import {PaymentDraft} from "./payment-draft";
 import {applyPlannedDraft, changedFields, describeDraftChange, chooseDraft, confirmDraft, draftTurn, editDraft, emptyDraft, nextDraftQuestion, readyDraft, resolveKnownRecipient, type DraftField, type DraftMemory} from "../lib/draft-memory";
@@ -42,7 +42,7 @@ const prompts = [
 
 export function Agent({demo, intro = false, devnet = false}: {demo: boolean; intro?: boolean; devnet?: boolean}) {
   const router = useRouter();
-  const {state, setState, ready, openingPrompt, openingVoice} = useWorkspace();
+  const {state, update, ready, saving, openingPrompt, openingVoice} = useWorkspace();
   const {publicKey} = useWallet();
   const [leaving, setLeaving] = useState(false);
   const [arriving, setArriving] = useState(false);
@@ -56,6 +56,7 @@ export function Agent({demo, intro = false, devnet = false}: {demo: boolean; int
   const highlightTimer = useRef<number | undefined>(undefined);
   const [market, setMarket] = useState<Market>();
   const pinnedMarkets = useRef(new Map<string, MarketChoice>());
+  const marketRequests = useRef(new Map<string, Promise<MarketChoice[]>>());
   const [escrow, setEscrow] = useState<string>();
   const [devnetReceipt, setDevnetReceipt] = useState<string>();
   const [transcript, setTranscript] = useState("");
@@ -107,53 +108,86 @@ export function Agent({demo, intro = false, devnet = false}: {demo: boolean; int
 
   const condition = memory.current.condition;
   const marketCondition = condition && parseMarketCondition(condition) ? condition : undefined;
-  useEffect(() => {
-    if (!marketCondition) {setMarket(undefined); return;}
-    const pinned = pinnedMarkets.current.get(marketCondition);
-    if (pinned) {setMarket({condition: marketCondition, selected: pinned, notice: ""}); return;}
-    const controller = new AbortController();
-    setMarket({condition: marketCondition, notice: "Looking up active Gemini markets…"});
-    void fetch(`/api/gemini?condition=${encodeURIComponent(marketCondition)}`, {signal: controller.signal})
+  const lookupMarket = useCallback((condition: string) => {
+    const pinned = pinnedMarkets.current.get(condition);
+    if (pinned) return Promise.resolve([pinned]);
+    const pending = marketRequests.current.get(condition);
+    if (pending) return pending;
+    const request = fetch(`/api/gemini?condition=${encodeURIComponent(condition)}`, {signal: AbortSignal.timeout(10_000)})
       .then(async response => {
         if (!response.ok) throw new Error("Market lookup failed");
         const {choices}: {choices: MarketChoice[]} = await response.json();
-        if (controller.signal.aborted) return;
+        if (choices.length === 1) pinnedMarkets.current.set(condition, choices[0]);
+        return choices;
+      })
+      .finally(() => marketRequests.current.delete(condition));
+    marketRequests.current.set(condition, request);
+    return request;
+  }, []);
+
+  useEffect(() => {
+    if (!marketCondition) {setMarket(undefined); return;}
+    let current = true;
+    setMarket({condition: marketCondition, notice: "Looking up active Gemini markets…"});
+    void lookupMarket(marketCondition)
+      .then(choices => {
+        if (!current) return;
         if (!choices.length) setMarket({condition: marketCondition, notice: "I couldn’t find an active Gemini market. Try its exact title."});
-        else if (choices.length === 1) {
-          pinnedMarkets.current.set(marketCondition, choices[0]);
-          setMarket({condition: marketCondition, selected: choices[0], notice: ""});
-        }
+        else if (choices.length === 1) setMarket({condition: marketCondition, selected: choices[0], notice: ""});
         else setMarket({condition: marketCondition, choices, notice: "Which Gemini contract should determine release?"});
       })
       .catch(() => {
-        if (!controller.signal.aborted) setMarket({condition: marketCondition, notice: "Gemini market data is temporarily unavailable."});
+        if (current) setMarket({condition: marketCondition, notice: "Gemini market data is temporarily unavailable."});
       });
-    return () => controller.abort();
-  }, [marketCondition]);
+    return () => {current = false;};
+  }, [lookupMarket, marketCondition]);
 
-  const confirm = useCallback(() => {
+  const marketReply = useCallback(async (condition: string) => {
+    try {
+      const choices = await lookupMarket(condition);
+      return describeMarketPreview(condition, choices.length === 1 ? choices[0] : undefined);
+    } catch {
+      return describeMarketPreview(condition);
+    }
+  }, [lookupMarket]);
+
+  const confirming = useRef(false);
+  const confirmationIds = useRef(new WeakMap<DraftMemory, string>());
+  const confirm = useCallback(async () => {
     if (!ready) return "The workspace is still loading.";
+    if (confirming.current) return "This escrow is already being confirmed.";
     const current = memoryRef.current;
     if (current.current.status === "confirmed") return "This draft is already confirmed.";
     if (current.choices) return "Choose a recipient before confirming.";
     const draft = readyDraft(current);
     if (!draft) return nextDraftQuestion(current.current);
-    if (parseMarketCondition(draft.condition)) return marketPreviewMessage;
+    if (parseMarketCondition(draft.condition)) return describeMarketPreview(draft.condition, pinnedMarkets.current.get(draft.condition));
     if (devnet) return "Review the fixed test amount and recipient, then use the Devnet confirm button.";
     const issue = guard(state, draft.amount);
     if (issue) return issue;
-    const id = "AL-" + crypto.randomUUID().slice(0, 8).toUpperCase();
-    setState(currentState => addEscrow(currentState, draft, id));
-    applyDraft(confirmDraft(current));
-    setEscrow(id);
+    const id = confirmationIds.current.get(current) ?? "AL-" + crypto.randomUUID().replaceAll("-", "").toUpperCase();
+    confirmationIds.current.set(current, id);
+    confirming.current = true;
+    try {
+      await update({type:"create", draft, id});
+    } catch (error) {
+      return error instanceof Error ? error.message : "Could not save the escrow.";
+    } finally {
+      confirming.current = false;
+    }
+    if (memoryRef.current === current) {
+      applyDraft(confirmDraft(current));
+      setEscrow(id);
+    }
     return `I placed ${money(draft.amount)} USDC in demo escrow for ${draft.recipient}.`;
-  }, [applyDraft, devnet, ready, setState, state]);
+  }, [applyDraft, devnet, ready, update, state]);
 
   const addTurn = useCallback((prompt: string) => {
     stopReplyVoice();
     const revision = ++turnRevision.current;
     const id = crypto.randomUUID();
     let recognized = true;
+    let previewCondition: string | undefined;
     let reply = "For a payment, tell me the amount and recipient. You can also tell me what needs to happen before release.";
     const isConfirmation = /^confirm(?: (?:it|(?:the )?(?:draft|payment|escrow)))?[.!?]*$/i.test(prompt.trim());
     const chainRead = /^(?:check|show|verify) (?:the )?(?:solana )?devnet(?: status)?[.!?]*$/i.test(prompt.trim());
@@ -162,23 +196,27 @@ export function Agent({demo, intro = false, devnet = false}: {demo: boolean; int
     const names = state.escrows.map(escrow => escrow.recipient);
     const repair = local && !/^undo[.!?]*$/i.test(prompt.trim())
       ? resolveKnownRecipient(currentDraft, local.memory, names) ?? local : local;
-    if (chainRead) recognized = false;
-    else if (isConfirmation) reply = confirm();
+    if (isConfirmation || chainRead) recognized = isConfirmation;
     else if (repair) {
       applyDraft(repair.memory);
       const terms = readyDraft(repair.memory);
-      reply = terms && parseMarketCondition(terms.condition) && !/^undo$/i.test(prompt.trim())
-        ? marketPreviewMessage : repair.reply;
+      reply = repair.reply;
+      if (terms && parseMarketCondition(terms.condition) && !/^undo[.!?]*$/i.test(prompt.trim())) {
+        previewCondition = terms.condition;
+      }
     }
-    else if (/pending|status|escrows|history|activity/i.test(prompt)) reply = escrows.length ? escrows.map(e => `${e.recipient} · ${money(e.amount)} USDC · ${e.status}. ${e.condition}.`).join("\n") : "There are no open escrows.";
+    else if (/pending|status|escrows|history|activity/i.test(prompt)) reply = escrows.length ? escrows.map(e => `${e.recipient} · ${money(e.amount)} USDC · ${e.status}. ${displayCondition(e.condition)}.`).join("\n") : "There are no open escrows.";
     else if (/limit|spend|allow|permission/i.test(prompt)) reply = `You have ${money(remaining)} USDC available under your ${money(state.limit)} USDC workspace limit. ${state.paused ? "Ava is paused. Funding and releases are disabled." : `Funding is ${state.allowHold ? "enabled" : "disabled"}, and releases are ${state.allowRelease ? "enabled" : "disabled"}.`}`;
     else if (/receiv|deposit/i.test(prompt)) reply = publicKey ? `Connected Solana address: ${publicKey.toBase58()}. Incoming transfers are simulated in this workspace.` : "Connect a Solana wallet from the workspace header to see its public address. Incoming transfers are simulated in this workspace.";
     else recognized = false;
-    setTurns(previous => [...previous, {id, prompt, reply: recognized ? reply : "Thinking…", pending: !recognized}]);
+    const pending = isConfirmation || !recognized || Boolean(previewCondition);
+    setTurns(previous => [...previous, {id, prompt, reply: pending ? "Thinking…" : reply, pending}]);
+    const finish = (answer: string) => setTurns(previous =>
+      previous.map(turn => turn.id === id ? {...turn, pending: false, reply: answer} : turn));
+    if (isConfirmation) void confirm().then(finish);
+    else if (previewCondition) void marketReply(previewCondition).then(finish);
     if (!recognized) {
       const current = memoryRef.current;
-      const finish = (answer: string) => setTurns(previous =>
-        previous.map(turn => turn.id === id ? {...turn, pending: false, reply: answer} : turn));
       if (chainRead) {
         void fetch("/api/devnet/status", {cache: "no-store", signal: AbortSignal.timeout(8_000)})
           .then(async response => {
@@ -221,12 +259,12 @@ export function Agent({demo, intro = false, devnet = false}: {demo: boolean; int
         const result = resolveKnownRecipient(current, planned.memory, names) ?? planned;
         applyDraft(result.memory);
         const terms = readyDraft(result.memory);
-        finish(terms && parseMarketCondition(terms.condition) ? marketPreviewMessage : result.reply);
+        finish(terms && parseMarketCondition(terms.condition) ? await marketReply(terms.condition) : result.reply);
       }).catch(() => finish("I couldn’t reach the planner. If this is a payment, try stating the amount and recipient directly."));
     }
     setInput("");
     setNotice("");
-  }, [applyDraft, confirm, escrows, publicKey, remaining, state.allowHold, state.allowRelease, state.escrows, state.limit, state.paused, turns]);
+  }, [applyDraft, confirm, escrows, marketReply, publicKey, remaining, state.allowHold, state.allowRelease, state.escrows, state.limit, state.paused, turns]);
 
   useEffect(() => {if (intro) router.prefetch("/agent/chat");}, [intro, router]);
 
@@ -372,7 +410,8 @@ export function Agent({demo, intro = false, devnet = false}: {demo: boolean; int
   function toggleSpokenReplies() {
     if (state.voice) stopReplyVoice();
     else unlockReplyVoice();
-    setState(current => ({...current, voice: !current.voice}));
+    void update({type:"preference", key:"voice", value:!state.voice})
+      .catch(error => setNotice(error instanceof Error ? error.message : "Could not save your voice preference."));
   }
 
   const composer = (
@@ -428,7 +467,7 @@ export function Agent({demo, intro = false, devnet = false}: {demo: boolean; int
         </motion.article>)}</div>
         <PaymentDraft devnet={devnet} devnetReceipt={devnet ? devnetReceipt : undefined} memory={memory} highlighted={highlighted} escrow={escrow}
           paused={state.paused} availableLimit={overLimit ? remaining : undefined}
-          canConfirm={ready && currentAmount !== undefined && Boolean(readyDraft(memory)) && !guard(state, currentAmount)}
+          canConfirm={ready && !saving && currentAmount !== undefined && Boolean(readyDraft(memory)) && !guard(state, currentAmount)}
           confirm={() => {if (state.voice) unlockReplyVoice(); addTurn("Confirm");}}
           undo={() => {if (state.voice) unlockReplyVoice(); addTurn("Undo");}}
           edit={(patch: Partial<Draft>) => {
@@ -458,6 +497,7 @@ export function Agent({demo, intro = false, devnet = false}: {demo: boolean; int
               if (current.current.condition !== condition || !readyDraft(current)) return;
               applyDraft(confirmDraft(editDraft(current, {amount: 10, recipient: receipt.recipient})));
               setDevnetReceipt(receipt.explorerUrl);
+              setEscrow(`DV-${receipt.requestId}`);
             }}/>
         )}
         <div className="conversation-end" ref={conversationEnd}/>
@@ -468,7 +508,7 @@ export function Agent({demo, intro = false, devnet = false}: {demo: boolean; int
     <aside className="agent-side">
       <section className="panel">
         <button className="panel-heading" onClick={() => setPanelOpen(!panelOpen)} aria-expanded={panelOpen} aria-controls="active-escrows"><span><LockKeyhole size={16}/> Active escrows <small>{escrows.length}</small></span><ChevronDown size={17} className={panelOpen ? "" : "-rotate-90"}/></button>
-        {panelOpen && <div id="active-escrows">{escrows.length ? escrows.map(e => <Link className="escrow-row" key={e.id} href={`/payments/${e.id}`}><div><strong>{e.recipient}</strong><span>{money(e.amount)} USDC</span></div><StatusBadge status={e.status}/><p>{e.condition}</p></Link>) : <p className="panel-empty">No funds are currently held. Confirm a payment to see it here.</p>}</div>}
+        {panelOpen && <div id="active-escrows">{escrows.length ? escrows.map(e => <Link className="escrow-row" key={e.id} href={`/payments/${e.id}`}><div><strong>{e.recipient}</strong><span>{money(e.amount)} USDC</span></div><StatusBadge status={e.status}/><p>{displayCondition(e.condition)}</p></Link>) : <p className="panel-empty">No funds are currently held. Confirm a payment to see it here.</p>}</div>}
       </section>
       <section className="panel limit-panel"><div className="panel-heading"><span><ShieldCheck size={17}/> Spending limits</span></div><div className="limit-details"><strong>{money(remaining)} <small>USDC</small></strong><p>Available of {money(state.limit)} USDC</p><progress max={state.limit || 1} value={Math.min(committed(state), state.limit)} aria-label="Workspace spending limit used"/><p>{state.paused ? "Agent paused · Funding and releases disabled" : `Funding ${state.allowHold ? "enabled" : "disabled"} · Releases ${state.allowRelease ? "enabled" : "disabled"}`}</p><Link href="/settings" className="text-link">Manage permissions <ArrowRight size={14}/></Link></div></section>
     </aside>
