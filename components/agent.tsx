@@ -32,6 +32,7 @@ const btcPrompt = "Hold 5 USDC for Dave until the next BTC 5-minute round settle
 const prompts = [
   {label:"Hold a payment", value:demoInstruction},
   {label:btcPrompt, value:btcPrompt},
+  {label:"Check Solana Devnet", value:"Check Solana Devnet"},
   {label:"Check payment status", value:"What payments are pending?"},
   {label:"Review my limits", value:"What can you spend?"},
   {label:"Get receiving details", value:"How do I receive USDC?"},
@@ -136,8 +137,10 @@ export function Agent({demo, intro = false}: {demo: boolean; intro?: boolean}) {
     let recognized = true;
     let reply = "For a payment, tell me the amount and recipient. You can also tell me what needs to happen before release.";
     const isConfirmation = /^confirm(?: (?:it|(?:the )?(?:draft|payment|escrow)))?[.!?]*$/i.test(prompt.trim());
-    const repair = isConfirmation ? null : draftTurn(memoryRef.current, prompt);
-    if (isConfirmation) reply = confirm();
+    const chainRead = /^(?:check|show|verify) (?:the )?(?:solana )?devnet(?: status)?[.!?]*$/i.test(prompt.trim());
+    const repair = isConfirmation || chainRead ? null : draftTurn(memoryRef.current, prompt);
+    if (chainRead) recognized = false;
+    else if (isConfirmation) reply = confirm();
     else if (repair) {
       applyDraft(repair.memory);
       reply = repair.reply;
@@ -151,7 +154,20 @@ export function Agent({demo, intro = false}: {demo: boolean; intro?: boolean}) {
       const current = memoryRef.current;
       const finish = (answer: string) => setTurns(previous =>
         previous.map(turn => turn.id === id ? {...turn, pending: false, reply: answer} : turn));
-      void fetch("/api/plan", {
+      if (chainRead) {
+        void fetch("/api/devnet/status", {cache: "no-store", signal: AbortSignal.timeout(8_000)})
+          .then(async response => {
+            if (!response.ok) throw new Error("Devnet status unavailable");
+            const {rpc, classicSpl, decimals, programExecutable} = await response.json();
+            if (!rpc?.healthy || !Number.isSafeInteger(rpc.slot)) throw new Error("Devnet RPC unavailable");
+            const mint = classicSpl && decimals === 6
+              ? "I verified the Circle test USDC mint uses the SPL Token Program and has six decimals."
+              : "I couldn’t verify the Circle test USDC mint.";
+            const program = programExecutable ? "The Ava escrow program is executable." : "Ava’s escrow program is unavailable.";
+            finish(`Solana Devnet is responding at slot ${rpc.slot.toLocaleString()}. ${mint} ${program}`);
+          })
+          .catch(() => finish("I couldn’t verify Solana Devnet right now. Try again shortly."));
+      } else void fetch("/api/plan", {
         method: "POST",
         headers: {"content-type": "application/json"},
         body: JSON.stringify({
@@ -161,7 +177,14 @@ export function Agent({demo, intro = false}: {demo: boolean; intro?: boolean}) {
         }),
       }).then(async response => {
         if (response.status === 503) {finish(reply); return;}
-        if (!response.ok) throw new Error("Planner failed");
+        if (!response.ok) {
+          const failure = await response.json().catch(() => null);
+          if (failure?.code === "planner_access") {
+            finish("Grok access is unavailable right now. You can still draft a payment with an amount, recipient, and release condition.");
+            return;
+          }
+          throw new Error("Planner failed");
+        }
         const plan: {reply: string; patch?: Partial<Draft>} = await response.json();
         if (!plan.patch) {finish(plan.reply); return;}
         if (revision !== turnRevision.current || current !== memoryRef.current) {

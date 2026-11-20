@@ -56,7 +56,10 @@ export async function POST(request: Request) {
         status: response.status,
         code: typeof code === "string" && /^[a-z0-9_-]{1,80}$/i.test(code) ? code : undefined,
       });
-      return Response.json({error: "AI planning is temporarily unavailable."}, {status: 502});
+      return Response.json({
+        error: "AI planning is temporarily unavailable.",
+        ...(response.status === 401 || response.status === 403 ? {code: "planner_access"} : {}),
+      }, {status: 502});
     }
     const result = await response.json();
     const content = result.choices?.[0]?.message?.content;
