@@ -2,6 +2,7 @@
 import Link from "next/link";
 import {useState} from "react";
 import {ArrowLeft, Check, LockKeyhole} from "lucide-react";
+import {formatReleaseDate} from "../lib/release-schedule";
 import {active, displayCondition, guard, money, type Action} from "../lib/payments";
 import {StatusBadge, useWorkspace} from "./workspace";
 
@@ -15,7 +16,7 @@ export function PaymentDetail({id}: {id: string}) {
   const actions: {id: Action; label: string}[] = [];
   if (!state.paused && escrow.status !== "Paused") {
     if (state.allowRelease) actions.push({id:"release", label:escrow.status === "Ready to release" ? "Release funds" : "Approve early"});
-    if (escrow.status !== "Ready to release") actions.push({id:"verify", label:"Mark condition met"});
+    if (escrow.status !== "Ready to release" && escrow.releaseAt === undefined) actions.push({id:"verify", label:"Mark condition met"});
     if (state.allowHold) actions.push({id:"add", label:"Add funds"});
     actions.push({id:"pause", label:"Pause escrow"});
   }
@@ -53,6 +54,7 @@ export function PaymentDetail({id}: {id: string}) {
     <Link href="/activity" className="text-link back"><ArrowLeft size={15}/> Activity</Link>
     <h1>{escrow.recipient}</h1>
     <div className="detail-grid"><section className="panel detail-card"><StatusBadge status={escrow.status}/><h2>{money(escrow.amount)} <small>USDC</small></h2><div className="condition"><LockKeyhole size={19}/><div><strong>Release condition</strong><p>{displayCondition(escrow.condition)}</p></div></div>
+    {escrow.releaseAt !== undefined && <p>Scheduled release <time dateTime={new Date(escrow.releaseAt).toISOString()}>{formatReleaseDate(escrow.releaseAt)}</time></p>}
     {active(escrow) && <div className="action-list">{actions.map((action, index) => <button key={action.id} disabled={!ready || saving} className={`button ${index === 0 && action.id === "release" ? "primary" : "glass"}`} onClick={() => {setPending(action.id); setError("");}}>{action.label}</button>)}</div>}
     {selected && pending && <form className="action-form" onSubmit={apply}><strong>{selected.label}</strong><p>{explanations[pending]}</p>{pending === "add" && <label>Amount in USDC<input value={amount} onChange={e => setAmount(e.target.value)} inputMode="decimal" autoFocus required/></label>}{error && <p role="alert">{error}</p>}<div className="action-list"><button className="button primary" disabled={saving}>Confirm</button><button type="button" className="button glass" onClick={() => setPending(null)}>Go back</button></div></form>}</section>
     <section className="panel detail-card timeline"><h3>Timeline</h3><ol>{escrow.events.map((event,index) => <li key={index}><Check size={15}/><div><strong>{event.label}</strong><time dateTime={event.at}>{new Intl.DateTimeFormat("en-US",{dateStyle:"medium",timeStyle:"short",timeZone:"UTC"}).format(new Date(event.at))} UTC</time></div></li>)}</ol></section></div>

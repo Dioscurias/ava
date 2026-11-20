@@ -1,8 +1,10 @@
+import {releaseTime, splitScheduledPayment} from "./release-schedule";
+
 export const demoInstruction = "Hold 250 USDC for Maya Chen until she delivers the final files.";
 
 export type Draft = {amount: number; recipient: string; condition: string};
 export type Status = "Holding" | "Conditions pending" | "Ready to release" | "Completed" | "Cancelled" | "Paused";
-export type Escrow = Draft & {id: string; status: Status; events: {label: string; at: string}[]};
+export type Escrow = Draft & {id: string; status: Status; releaseAt?: number; events: {label: string; at: string}[]};
 export type State = {escrows: Escrow[]; limit: number; paused: boolean; voice: boolean; microphone?: boolean; allowHold: boolean; allowRelease: boolean};
 export type Action = "release" | "cancel" | "add" | "pause" | "resume" | "verify";
 
@@ -29,15 +31,17 @@ const recipientFirst = new RegExp(String.raw`^(?:(?:send|make) (?:a )?payment(?:
 export function parsePayment(input: string): Draft | null {
   const instruction = input.trim().replace(paymentLead, "")
     .replace(/(?:[,\s]+and\s+that['’]s\s+(?:his|her|their|the)\s+recipient)?(?:[,\s]+(?:so\s+)?please)?[.!?]*$/i, "");
-  const direct = instruction.match(amountFirst);
-  const reverse = direct ? null : instruction.match(recipientFirst);
+  const timed = splitScheduledPayment(instruction);
+  const payment = timed?.payment ?? instruction;
+  const direct = payment.match(amountFirst);
+  const reverse = direct ? null : payment.match(recipientFirst);
   if (!direct && !reverse) return null;
   const [value, payee, condition] = direct ? direct.slice(1) : [reverse![2], reverse![1], reverse![3]];
   const amount = Math.round(Number(value.replaceAll(",", "")) * 100);
   const recipient = payee.trim();
   if (/\$|(?:^|\s)(?:-\d|\d+(?:\.\d+)?\s*(?:USDC|USD|dollars?)\b)/i.test(recipient)) return null;
   if (!Number.isSafeInteger(amount) || amount <= 0 || !recipient || recipient.length > 100) return null;
-  return {amount, recipient, condition: condition?.trim().replace(/[.!?]$/, "") || "You confirm the release"};
+  return {amount, recipient, condition: timed?.condition ?? (condition?.trim().replace(/[.!?]$/, "") || "You confirm the release")};
 }
 
 export function guard(state: State, amount: number) {
@@ -48,9 +52,31 @@ export function guard(state: State, amount: number) {
   return null;
 }
 
-export function addEscrow(state: State, draft: Draft, id: string): State {
-  if (guard(state, draft.amount)) return state;
-  return {...state, escrows: [{...draft, id, status:"Conditions pending", events:[{label:`${money(draft.amount)} USDC placed in demo escrow`, at:new Date().toISOString()}]}, ...state.escrows]};
+export function addEscrow(state: State, draft: Draft, id: string, now = Date.now()) {
+  const releaseAt = releaseTime(draft.condition, now);
+  if (guard(state, draft.amount) || releaseAt === null) return state;
+  const escrow: Escrow = {...draft,id,status:"Conditions pending",...(releaseAt === undefined ? {} : {releaseAt}),
+    events:[{label:`${money(draft.amount)} USDC placed in demo escrow`, at:new Date(now).toISOString()}]};
+  return {...state, escrows:[escrow,...state.escrows]};
+}
+
+const timedReleaseAllowed = (escrow: Escrow) =>
+  (escrow.status === "Holding" || escrow.status === "Conditions pending" || escrow.status === "Ready to release") &&
+  typeof escrow.releaseAt === "number" && Number.isFinite(escrow.releaseAt);
+
+export function nextScheduledRelease(state: State) {
+  if (state.paused || !state.allowRelease) return Infinity;
+  return state.escrows.reduce((next, escrow) => timedReleaseAllowed(escrow)
+    ? Math.min(next, escrow.releaseAt!) : next, Infinity);
+}
+
+export function releaseScheduledEscrows(state: State, now: number) {
+  if (nextScheduledRelease(state) > now) return state;
+  const at = new Date(now).toISOString();
+  const escrows = state.escrows.map((escrow): Escrow => timedReleaseAllowed(escrow) && escrow.releaseAt! <= now
+    ? {...escrow,status:"Completed",events:[...escrow.events,{label:"Automatic release · scheduled time reached",at}]}
+    : escrow);
+  return {...state,escrows};
 }
 
 export function changeEscrow(state: State, id: string, action: Action, amount = 0): State {

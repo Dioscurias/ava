@@ -1,6 +1,7 @@
+import {releaseTime} from "./release-schedule";
 import {readyDraft} from "./draft-memory";
 import {parseMarketCondition} from "./gemini-condition";
-import {addEscrow, changeEscrow, committed, guard, money, type Action, type Draft, type State} from "./payments";
+import {addEscrow, changeEscrow, committed, guard, money, releaseScheduledEscrows, type Action, type Draft, type State} from "./payments";
 
 export const workspacePreferences = ["allowHold", "allowRelease", "microphone", "voice", "paused"] as const;
 const escrowActions: readonly Action[] = ["release", "cancel", "add", "pause", "resume", "verify"];
@@ -8,6 +9,7 @@ const escrowActions: readonly Action[] = ["release", "cancel", "add", "pause", "
 export type WorkspaceOperation =
   | {type:"create"; id:string; draft:Draft}
   | {type:"escrow"; id:string; action:Action; amount:number}
+  | {type:"release-due"}
   | {type:"limit"; amount:number}
   | {type:"preference"; key:typeof workspacePreferences[number]; value:boolean};
 
@@ -21,6 +23,7 @@ function record(value: unknown): Record<string, unknown> {
 
 export function parseWorkspaceOperation(value: unknown): WorkspaceOperation {
   const input = record(value);
+  if (input.type === "release-due") return {type:"release-due"};
   const amount = (v: unknown) => typeof v === "number" && Number.isSafeInteger(v) && v >= 0;
   const id = typeof input.id === "string" && /^AL-[A-F0-9]{4,32}$/.test(input.id) ? input.id : null;
   if (input.type === "create" && id && id.length === 35) {
@@ -44,7 +47,7 @@ export function parseWorkspaceOperation(value: unknown): WorkspaceOperation {
   throw new WorkspaceError("Invalid workspace change.");
 }
 
-export function applyWorkspaceOperation(state: State, operation: WorkspaceOperation): State {
+export function applyWorkspaceOperation(state: State, operation: WorkspaceOperation, now = Date.now()): State {
   switch (operation.type) {
     case "create": {
       const existing = state.escrows.find(escrow => escrow.id === operation.id);
@@ -55,8 +58,12 @@ export function applyWorkspaceOperation(state: State, operation: WorkspaceOperat
       }
       const issue = guard(state, operation.draft.amount);
       if (issue) throw new WorkspaceError(issue,409);
-      return addEscrow(state, operation.draft, operation.id);
+      if (releaseTime(operation.draft.condition, now) === null) {
+        throw new WorkspaceError("Choose a future release date or a positive duration.",400);
+      }
+      return addEscrow(state, operation.draft, operation.id, now);
     }
+    case "release-due": return releaseScheduledEscrows(state,now);
     case "escrow": {
       if (!state.escrows.some(escrow => escrow.id === operation.id)) throw new WorkspaceError("Escrow unavailable.",404);
       const next = changeEscrow(state, operation.id, operation.action, operation.amount);

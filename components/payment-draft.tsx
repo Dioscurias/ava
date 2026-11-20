@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useState, type FormEvent } from "react";
+import { scheduledCondition } from "../lib/release-schedule";
 import { money, type Draft } from "../lib/payments";
 import { defaultCondition, type DraftField, type DraftMemory } from "../lib/draft-memory";
 import type {MarketChoice} from "../lib/gemini-condition";
@@ -45,12 +46,14 @@ export function PaymentDraft({memory, highlighted, escrow, canConfirm, paused, a
   if (!choices && !current.amount && !current.recipient && !current.condition) return null;
   const selected = market?.selected;
   const terms = choices?.[0] ?? current;
+  const schedule = terms.condition && scheduledCondition(terms.condition);
   return <section className="draft payment-draft" aria-label="Current payment draft">
     <h3>{current.status === "confirmed" ? "Confirmed payment" : "Payment draft"}</h3>
     <dl>
       <div data-draft-highlight={highlighted.includes("amount")}><dt>Amount</dt><dd>{terms.amount ? `${money(terms.amount)} USDC` : "Amount needed"}</dd></div>
       <div data-draft-highlight={highlighted.includes("recipient")}><dt>Recipient</dt><dd>{choices ? "Choose a recipient" : current.recipient || "Recipient needed"}</dd></div>
       <div data-draft-highlight={highlighted.includes("condition")}><dt>Release condition</dt><dd>{terms.condition ?? defaultCondition}</dd></div>
+      {schedule && <div><dt>Automatic release</dt><dd>{schedule.text}</dd></div>}
       {selected && <>
         <div><dt>Gemini market</dt><dd>{selected.title} · {selected.label}</dd></div>
         <div><dt>Release outcome</dt><dd>{selected.side.toUpperCase()}</dd></div>
@@ -70,6 +73,9 @@ export function PaymentDraft({memory, highlighted, escrow, canConfirm, paused, a
       <p><strong>Exceeds your available limit of {money(availableLimit)} USDC</strong></p>
       <p>Lower the amount or <Link className="text-link" href="/settings">raise the limit in Settings</Link>.</p>
     </div>}
+    {schedule && <p>{devnet
+      ? "Scheduled releases are available in Simulation."
+      : "After confirmation, Ava releases the demo funds when due while your workspace is open, or when you return. Pause or disable releases to stop an upcoming release."}</p>}
     {market?.notice && <p role="status">{market.notice}</p>}
     {market?.choices?.map(choice => <button type="button" className="button glass" key={choice.instrumentSymbol} onClick={() => chooseMarket(choice)}>
       {choice.title} · {choice.label} · {choice.instrumentSymbol} · {formatExpiry(choice.expiryDate)}

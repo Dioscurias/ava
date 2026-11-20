@@ -10,6 +10,7 @@ import {useCallback, useEffect, useLayoutEffect, useRef, useState} from "react";
 import {motion, useReducedMotion} from "framer-motion";
 import {ArrowRight, ArrowUp, AudioLines, ChevronDown, LockKeyhole, Mic, ShieldCheck} from "lucide-react";
 import {active, committed, demoInstruction, displayCondition, guard, money, type Draft} from "../lib/payments";
+import {scheduledCondition} from "../lib/release-schedule";
 import {describeMarketPreview, parseMarketCondition, type MarketChoice} from "../lib/gemini-condition";
 import {JudgeDevnet} from "./judge-devnet";
 import {PaymentDraft} from "./payment-draft";
@@ -164,6 +165,7 @@ export function Agent({demo, intro = false, devnet = false}: {demo: boolean; int
     const draft = readyDraft(current);
     if (!draft) return nextDraftQuestion(current.current);
     if (parseMarketCondition(draft.condition)) return describeMarketPreview(draft.condition, pinnedMarkets.current.get(draft.condition));
+    if (devnet && scheduledCondition(draft.condition)) return "Scheduled automatic release is available in Simulation.";
     if (devnet) return "Review the fixed test amount and recipient, then use the Devnet confirm button.";
     const issue = guard(state, draft.amount);
     if (issue) return issue;
@@ -181,7 +183,8 @@ export function Agent({demo, intro = false, devnet = false}: {demo: boolean; int
       applyDraft(confirmDraft(current));
       setEscrow(id);
     }
-    return `I placed ${money(draft.amount)} USDC in demo escrow for ${draft.recipient}.`;
+    const schedule = scheduledCondition(draft.condition);
+    return `I placed ${money(draft.amount)} USDC in demo escrow for ${draft.recipient}.${schedule ? ` Automatic release is scheduled for ${schedule.text}.` : ""}`;
   }, [applyDraft, devnet, ready, update, state]);
 
   const addTurn = useCallback((prompt: string) => {
@@ -498,7 +501,7 @@ export function Agent({demo, intro = false, devnet = false}: {demo: boolean; int
             pinnedMarkets.current.set(marketCondition, selected);
             setMarket({condition: marketCondition, selected, notice: ""});
           }}/>
-        {devnet && memory.current.status !== "incomplete" && !memory.choices && !marketCondition && memory.current.condition && (
+        {devnet && memory.current.status !== "incomplete" && !memory.choices && !marketCondition && memory.current.condition && !scheduledCondition(memory.current.condition) && (
           <JudgeDevnet draftCondition={memory.current.condition}
             fundingBlocked={!ready || overLimit || Boolean(guard(state, 10))}
             draftConfirmed={memory.current.status === "confirmed"}

@@ -8,7 +8,7 @@ import {Suspense, createContext, useCallback, useContext, useEffect, useLayoutEf
 import {continueWithGoogle, signOutAccount} from "../app/login/actions";
 import {applyWorkspaceOperation, type WorkspaceOperation} from "../lib/workspace-operations";
 import {Brand} from "./brand";
-import {initial, type State, type Status} from "../lib/payments";
+import {initial, nextScheduledRelease, type State, type Status} from "../lib/payments";
 
 type Account = {id:string; name:string; image?:string | null};
 const emptyWorkspace = {...initial, escrows:[]};
@@ -139,6 +139,23 @@ export function Workspace({children, account}: {children: React.ReactNode; accou
       setSaving(false);
     }
   }, [accountId, install, ready]);
+  useEffect(() => {
+    if (!ready) return;
+    let lastAttempt = -Infinity;
+    function checkRelease() {
+      const now = Date.now();
+      if (savingRef.current || now - lastAttempt < 4000 || now < nextScheduledRelease(current.current)) return;
+      lastAttempt = now;
+      void update({type:"release-due"}).catch(() => { /* Retry while a release is still due. */ });
+    }
+    checkRelease();
+    const timer = window.setInterval(checkRelease,1000);
+    document.addEventListener("visibilitychange",checkRelease);
+    return () => {
+      window.clearInterval(timer);
+      document.removeEventListener("visibilitychange",checkRelease);
+    };
+  }, [ready, update]);
   const links = [{href:"/agent", label:"Agent", icon:MessageSquare},{href:"/activity",label:"Activity",icon:Activity},{href:"/settings",label:"Settings",icon:Settings2}];
   return <Store.Provider value={{state, update, ready, saving, openingPrompt, openingVoice}}><ConnectionProvider endpoint={endpoint}><WalletProvider wallets={adapters}><div className="workspace">
     <header className="app-header">

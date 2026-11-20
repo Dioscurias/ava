@@ -1,3 +1,4 @@
+import {scheduledCondition} from "./release-schedule";
 import {isDraftQuestion} from "./ava-plan";
 import {parseMarketCondition} from "./gemini-condition";
 import {displayCondition, money, parsePayment, type Draft} from "./payments";
@@ -186,6 +187,8 @@ export function draftTurn(memory: DraftMemory, input: string): {memory: DraftMem
   const amountCorrection = text.match(/^(?:make (?:it|that)|actually|change (?:the )?amount to|amount is)\s+(.+?)(?:\s+instead)?$/i);
   const recipientCorrection = text.match(/^(?:change (?:it|the recipient) to|(?:the )?recipient is)\s+(.+)$/i);
   const condition = text.match(/^(?:(?:change (?:the )?condition to|condition is|until|when|after|if)\s+)(.+)$/i);
+  const scheduledFollowUp = text.match(/^(?:release(?: it)?|schedule(?: release)?)\s+(.+)$/i)?.[1];
+  const timedCondition = scheduledFollowUp && scheduledCondition(scheduledFollowUp) ? scheduledFollowUp : undefined;
   const noCondition = /^no (?:release )?condition$/i.test(text);
   const amount = amountOf(amountCorrection?.[1] ?? text);
   const unresolved = text.match(/^(?:pay|send|hold|escrow|set aside)(?: to| for)?(?:\s+(.+))?$/i);
@@ -206,7 +209,7 @@ export function draftTurn(memory: DraftMemory, input: string): {memory: DraftMem
     const recipient = recipientOf(recipientCorrection?.[1] ?? text);
     if (recipient) patch = {recipient};
   }
-  if (!patch && live && (condition || noCondition)) patch = {condition: noCondition ? defaultCondition : condition![1]};
+  if (!patch && live && (condition || timedCondition || noCondition)) patch = {condition: noCondition ? defaultCondition : timedCondition ?? condition![1]};
   if (!patch) {
     const short = text.match(/^(\$?[\d,.]+(?:\s+USDC)?)\s+(to|for)\s+(.+)$/i);
     const spoken = text.match(/^((?:hold|send|pay|escrow|set aside)\s+)([a-z -]+?)\s+(?:(?:usdc|usd|dollars?)\s+)?((?:to|for)\s+.+)$/i);
