@@ -21,3 +21,17 @@ export function readPlan(value: unknown): {reply: string; patch?: Partial<Draft>
   }
   return Object.keys(patch).length ? {reply: message || "Review the proposed payment terms.", patch} : null;
 }
+
+export function classifyWorkspaceQuestion(input: string): "activity" | "limits" | "receive" | null {
+  const text = input.trim().replace(/[.!?]+$/, "").toLowerCase();
+  if (/^(?:(?:show|check|list)(?: me)? (?:my |the )?)?(?:payment status|activity|escrow history|(?:active|open|pending) (?:escrows|payments))$/.test(text) ||
+      /^(?:what|which) (?:payments|escrows) are (?:pending|open|active)$/.test(text)) return "activity";
+  if (/^what can (?:you|i) spend$/.test(text) ||
+      /^(?:(?:show|check)(?: me)? |what(?: is|'s) )?(?:my |your |the )?(?:spending|workspace) limits?$/.test(text)) return "limits";
+  if (/^(?:how (?:do|can) i receive usdc|(?:get|show)(?: me)? (?:my )?(?:receiving details|wallet address))$/.test(text)) return "receive";
+  return null;
+}
+
+export function isDraftQuestion(input: string) {
+  return /^(?:what|why|how|who|where|when (?:does|do|can|will|should|is|are)|can (?:i|we)|could (?:i|we)|explain|tell me about)\b/i.test(input.trim());
+}

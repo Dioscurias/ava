@@ -15,8 +15,8 @@ import {JudgeDevnet} from "./judge-devnet";
 import {PaymentDraft} from "./payment-draft";
 import {applyPlannedDraft, changedFields, describeDraftChange, chooseDraft, confirmDraft, draftTurn, editDraft, emptyDraft, nextDraftQuestion, readyDraft, resolveKnownRecipient, type DraftField, type DraftMemory} from "../lib/draft-memory";
 import {StatusBadge, useWorkspace} from "./workspace";
-
-type RecognitionResult = ArrayLike<{transcript: string}> & {isFinal: boolean};
+import {classifyWorkspaceQuestion, isDraftQuestion} from "../lib/ava-plan";
+import {readSpeechTurn, speechSilenceMs, type RecognitionResult} from "../lib/speech-turn";
 
 type Recognition = {
   lang: string;
@@ -26,7 +26,7 @@ type Recognition = {
   stop: () => void;
   onresult: ((event: {results: ArrayLike<RecognitionResult>}) => void) | null;
   onend: (() => void) | null;
-  onerror: (() => void) | null;
+  onerror: ((event: {error: string}) => void) | null;
 };
 type Turn = {id: string; prompt: string; reply: string; pending?: boolean};
 type Market = {condition: string; choices?: MarketChoice[]; selected?: MarketChoice; notice: string};
@@ -63,6 +63,7 @@ export function Agent({demo, intro = false, devnet = false}: {demo: boolean; int
   const [voiceSession, setVoiceSession] = useState(false);
   const voiceSessionRef = useRef(false);
   const rearmTimer = useRef<number | undefined>(undefined);
+  const phraseTimer = useRef<number | undefined>(undefined);
   const [listening, setListening] = useState(false);
   const [notice, setNotice] = useState("");
   const [panelOpen, setPanelOpen] = useState(true);
@@ -81,6 +82,7 @@ export function Agent({demo, intro = false, devnet = false}: {demo: boolean; int
   }, [turns, memory.current, market, reduced, showHistory]);
   useEffect(() => () => {
     window.clearTimeout(rearmTimer.current);
+    window.clearTimeout(phraseTimer.current);
     if (voiceRef.current) {
       voiceRef.current.onend = null;
       voiceRef.current.onresult = null;
@@ -192,7 +194,8 @@ export function Agent({demo, intro = false, devnet = false}: {demo: boolean; int
     const isConfirmation = /^confirm(?: (?:it|(?:the )?(?:draft|payment|escrow)))?[.!?]*$/i.test(prompt.trim());
     const chainRead = /^(?:check|show|verify) (?:the )?(?:solana )?devnet(?: status)?[.!?]*$/i.test(prompt.trim());
     const currentDraft = memoryRef.current;
-    const local = isConfirmation || chainRead ? null : draftTurn(currentDraft, prompt);
+    const workspaceQuestion = classifyWorkspaceQuestion(prompt);
+    const local = isConfirmation || chainRead || workspaceQuestion ? null : draftTurn(currentDraft, prompt);
     const names = state.escrows.map(escrow => escrow.recipient);
     const repair = local && !/^undo[.!?]*$/i.test(prompt.trim())
       ? resolveKnownRecipient(currentDraft, local.memory, names) ?? local : local;
@@ -205,9 +208,9 @@ export function Agent({demo, intro = false, devnet = false}: {demo: boolean; int
         previewCondition = terms.condition;
       }
     }
-    else if (/pending|status|escrows|history|activity/i.test(prompt)) reply = escrows.length ? escrows.map(e => `${e.recipient} · ${money(e.amount)} USDC · ${e.status}. ${displayCondition(e.condition)}.`).join("\n") : "There are no open escrows.";
-    else if (/limit|spend|allow|permission/i.test(prompt)) reply = `You have ${money(remaining)} USDC available under your ${money(state.limit)} USDC workspace limit. ${state.paused ? "Ava is paused. Funding and releases are disabled." : `Funding is ${state.allowHold ? "enabled" : "disabled"}, and releases are ${state.allowRelease ? "enabled" : "disabled"}.`}`;
-    else if (/receiv|deposit/i.test(prompt)) reply = publicKey ? `Connected Solana address: ${publicKey.toBase58()}. Incoming transfers are simulated in this workspace.` : "Connect a Solana wallet from the workspace header to see its public address. Incoming transfers are simulated in this workspace.";
+    else if (workspaceQuestion === "activity") reply = escrows.length ? escrows.map(e => `${e.recipient} · ${money(e.amount)} USDC · ${e.status}. ${displayCondition(e.condition)}.`).join("\n") : "There are no open escrows.";
+    else if (workspaceQuestion === "limits") reply = `You have ${money(remaining)} USDC available under your ${money(state.limit)} USDC workspace limit. ${state.paused ? "Ava is paused. Funding and releases are disabled." : `Funding is ${state.allowHold ? "enabled" : "disabled"}, and releases are ${state.allowRelease ? "enabled" : "disabled"}.`}`;
+    else if (workspaceQuestion === "receive") reply = publicKey ? `Connected Solana address: ${publicKey.toBase58()}. Incoming transfers are simulated in this workspace.` : "Connect a Solana wallet from the workspace header to see its public address. Incoming transfers are simulated in this workspace.";
     else recognized = false;
     const pending = isConfirmation || !recognized || Boolean(previewCondition);
     setTurns(previous => [...previous, {id, prompt, reply: pending ? "Thinking…" : reply, pending}]);
@@ -235,6 +238,7 @@ export function Agent({demo, intro = false, devnet = false}: {demo: boolean; int
         headers: {"content-type": "application/json"},
         body: JSON.stringify({
           prompt,
+          mode: devnet ? "devnet" : "simulation",
           draft: current.current.status === "confirmed" ? null : current.current,
           history: turns.filter(turn => !turn.pending).slice(-4).map(({prompt, reply}) => ({prompt, reply: reply.slice(0, 400)})),
         }),
@@ -249,7 +253,7 @@ export function Agent({demo, intro = false, devnet = false}: {demo: boolean; int
           throw new Error("Planner failed");
         }
         const plan: {reply: string; patch?: Partial<Draft>} = await response.json();
-        if (!plan.patch) {finish(plan.reply); return;}
+        if (!plan.patch || isDraftQuestion(prompt)) {finish(plan.reply); return;}
         if (revision !== turnRevision.current || current !== memoryRef.current) {
           finish("The draft changed while I was working. Repeat the edit if you still want it.");
           return;
@@ -264,7 +268,7 @@ export function Agent({demo, intro = false, devnet = false}: {demo: boolean; int
     }
     setInput("");
     setNotice("");
-  }, [applyDraft, confirm, escrows, marketReply, publicKey, remaining, state.allowHold, state.allowRelease, state.escrows, state.limit, state.paused, turns]);
+  }, [applyDraft, confirm, devnet, escrows, marketReply, publicKey, remaining, state.allowHold, state.allowRelease, state.escrows, state.limit, state.paused, turns]);
 
   useEffect(() => {if (intro) router.prefetch("/agent/chat");}, [intro, router]);
 
@@ -304,6 +308,7 @@ export function Agent({demo, intro = false, devnet = false}: {demo: boolean; int
   }
 
   function stopListening() {
+    window.clearTimeout(phraseTimer.current);
     const active = voiceRef.current;
     voiceRef.current = null;
     active?.stop();
@@ -319,7 +324,7 @@ export function Agent({demo, intro = false, devnet = false}: {demo: boolean; int
     stopReplyVoice();
   }
 
-  const listen = useCallback(() => {
+  const listen = useCallback(function startRecognition() {
     if (!voiceSessionRef.current || voiceRef.current) return;
     const browser = window as Window & {SpeechRecognition?: new () => Recognition; webkitSpeechRecognition?: new () => Recognition};
     const Engine = browser.SpeechRecognition ?? browser.webkitSpeechRecognition;
@@ -332,44 +337,49 @@ export function Agent({demo, intro = false, devnet = false}: {demo: boolean; int
     const recognition = new Engine();
     voiceRef.current = recognition;
     recognition.lang = "en-US";
-    recognition.continuous = false;
+    recognition.continuous = true;
     recognition.interimResults = true;
 
     function finish() {
       if (voiceRef.current !== recognition) return false;
       voiceRef.current = null;
+      window.clearTimeout(phraseTimer.current);
       setListening(false);
       setTranscript("");
       return true;
     }
 
-    let finalInstruction = "";
+    let utterance = {preview:"", complete:""};
     recognition.onresult = event => {
       if (voiceRef.current !== recognition) return;
-      setTranscript(Array.from(event.results).map(result => result[0]?.transcript ?? "").join(" ").trim());
-      const instruction = Array.from(event.results)
-        .filter(result => result.isFinal)
-        .map(result => result[0]?.transcript ?? "")
-        .join(" ").trim();
-      if (!instruction || finalInstruction) return;
-      finalInstruction = instruction;
-      recognition.stop();
+      utterance = readSpeechTurn(event.results);
+      setTranscript(utterance.preview);
+      window.clearTimeout(phraseTimer.current);
+      if (utterance.complete) {
+        phraseTimer.current = window.setTimeout(() => recognition.stop(), speechSilenceMs);
+      }
     };
     function endSession(notice: string) {
       if (!finish()) return;
       voiceSessionRef.current = false;
       setVoiceSession(false);
+      if (utterance.preview) setInput(current => current || utterance.preview.slice(0, 600));
       setNotice(notice);
     }
     recognition.onend = () => {
-      if (finalInstruction) {
-        if (finish()) latestSend.current(finalInstruction);
-      } else {
-        endSession("Listening paused. Tap Speak to continue.");
+      if (utterance.complete) {
+        if (finish()) latestSend.current(utterance.complete);
+      } else if (utterance.preview) {
+        endSession("The browser stopped listening before the transcript was final. Review it before sending.");
+      } else if (finish() && voiceSessionRef.current) {
+        rearmTimer.current = window.setTimeout(startRecognition, 450);
       }
     };
-    recognition.onerror = () => {
-      endSession("Voice input stopped. Check your microphone permissions or tap Speak to try again.");
+    recognition.onerror = ({error}) => {
+      if (error === "no-speech" && !utterance.preview) return;
+      endSession(utterance.preview
+        ? "Voice input stopped. Review the captured text before sending."
+        : "Voice input stopped. Check your microphone permissions or tap Speak to try again.");
     };
     setNotice("");
     try {

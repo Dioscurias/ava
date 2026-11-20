@@ -1,3 +1,4 @@
+import {isDraftQuestion} from "./ava-plan";
 import {parseMarketCondition} from "./gemini-condition";
 import {displayCondition, money, parsePayment, type Draft} from "./payments";
 
@@ -159,6 +160,8 @@ export function applyPlannedDraft(memory: DraftMemory, prompt: string, patch: Pa
 
 export function draftTurn(memory: DraftMemory, input: string): {memory: DraftMemory; reply: string} | null {
   const text = input.trim().replace(/[.!?]+$/, "").replace(/^please[,\s]+|[,\s]+please$/gi, "").trim();
+  // Dictation may omit question marks, so use phrasing to spot questions before interpreting draft edits.
+  if (isDraftQuestion(text)) return null;
   if (/^undo$/i.test(text)) {
     if (memory.choices) return {memory: {...memory, choices: undefined}, reply: "I discarded that proposed change."};
     const previous = memory.history.at(-1);
