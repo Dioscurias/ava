@@ -8,9 +8,17 @@ const currentPlayback = {stop: null as (() => void) | null};
 export function stopReplyVoice() {currentPlayback.stop?.();}
 
 let output: AudioContext | undefined;
+let media: HTMLAudioElement | undefined;
+let mediaUnlocked = false;
+const silence = "data:audio/wav;base64,UklGRnQAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YVAAAACAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgA==";
 
 // Resume inside the click or submit handler, before synthesis or speech recognition.
 export function unlockReplyVoice() {
+  if (!mediaUnlocked && !currentPlayback.stop) {
+    media ??= new Audio();
+    media.src = silence;
+    void media.play().then(() => {mediaUnlocked = true;}).catch(() => {});
+  }
   try {
     const browser = window as Window & {webkitAudioContext?: typeof AudioContext};
     const Context = window.AudioContext ?? browser.webkitAudioContext;
@@ -25,7 +33,7 @@ export function unlockReplyVoice() {
 export function ReplyVoice({text, autoPlay}: {text:string; autoPlay:boolean}) {
   const active = useRef<Playback | null>(null);
   const autoStarted = useRef(false);
-  const cachedClip = useRef<AudioBuffer | null>(null);
+  const cachedClip = useRef<Blob | null>(null);
   const [status, setStatus] = useState<"idle" | "loading" | "playing">("idle");
   const [error, setError] = useState("");
 
@@ -37,6 +45,7 @@ export function ReplyVoice({text, autoPlay}: {text:string; autoPlay:boolean}) {
     setError("");
     const controller = new AbortController();
     let source: AudioBufferSourceNode | undefined;
+    let mediaUrl: string | undefined;
     let utterance: SpeechSynthesisUtterance | undefined;
     const stop = () => {
       if (controller.signal.aborted) return;
@@ -44,6 +53,12 @@ export function ReplyVoice({text, autoPlay}: {text:string; autoPlay:boolean}) {
       if (currentPlayback.stop === stop) currentPlayback.stop = null;
       active.current = null;
       if (source) {source.onended = null; source.stop(); source.disconnect();}
+      if (mediaUrl && media) {
+        media.onended = null;
+        media.pause();
+        media.removeAttribute("src");
+        URL.revokeObjectURL(mediaUrl);
+      }
       if (utterance) window.speechSynthesis.cancel();
       setStatus("idle");
     };
@@ -51,54 +66,65 @@ export function ReplyVoice({text, autoPlay}: {text:string; autoPlay:boolean}) {
     currentPlayback.stop = stop;
     setStatus("loading");
 
-    const player = output;
-    if (player && player.state !== "running") {
-      let timeout: number | undefined;
+    let clip = cachedClip.current;
+    if (!clip) {
       try {
-        await Promise.race([player.resume(), new Promise(resolve => { timeout = window.setTimeout(resolve, 750); })]);
-      } catch {
-        // The state check below offers manual retry when audio remains locked.
-      } finally {
-        window.clearTimeout(timeout);
-      }
-    }
-    if (controller.signal.aborted) return;
-    if (player?.state !== "running") {
-      stop();
-      setError("Tap Listen to enable audio.");
-      return;
-    }
-    try {
-      let clip = cachedClip.current;
-      if (!clip) {
         const response = await fetch("/api/voice", {
           method: "POST",
           headers: {"Content-Type": "application/json"},
           body: JSON.stringify({text: text.slice(0, 600)}),
           signal: controller.signal,
         });
-        if (!response.ok) throw Error("Voice unavailable");
-        clip = await player.decodeAudioData(await response.arrayBuffer());
+        if (!response.ok) throw Error("Voice request failed");
+        const audio = await response.blob();
         if (controller.signal.aborted) return;
+        if (audio.size === 0 || !audio.type.startsWith("audio/")) throw Error("Empty voice response");
+        clip = audio;
         cachedClip.current = clip;
+      } catch {
+        if (controller.signal.aborted) return;
+        setError("Couldn’t load the ElevenLabs reply. Using your device voice.");
       }
-      if (controller.signal.aborted) return;
-      if (player.state !== "running") {
+    }
+
+    if (clip) {
+      const player = output;
+      if (player?.state === "running") {
+        try {
+          const decoded = await player.decodeAudioData(await clip.arrayBuffer());
+          if (controller.signal.aborted) return;
+          if (player.state === "running") {
+            const node = player.createBufferSource();
+            node.buffer = decoded;
+            node.connect(player.destination);
+            node.start();
+            source = node;
+            node.onended = stop;
+            setStatus("playing");
+            return;
+          }
+        } catch {
+          if (controller.signal.aborted) return;
+          // Try native MP3 playback if Web Audio cannot decode or play the clip.
+        }
+      }
+      try {
+        media ??= new Audio();
+        mediaUrl = URL.createObjectURL(clip);
+        media.src = mediaUrl;
+        media.onended = stop;
+        await media.play();
+        if (controller.signal.aborted) return;
+        mediaUnlocked = true;
+        setStatus("playing");
+      } catch (error) {
+        if (controller.signal.aborted) return;
+        const blocked = error instanceof DOMException && error.name === "NotAllowedError";
+        if (blocked) mediaUnlocked = false;
         stop();
-        setError("Tap Listen to resume audio.");
-        return;
+        setError(blocked ? "Tap Listen to enable audio." : "Couldn’t play the ElevenLabs reply.");
       }
-      const node = player.createBufferSource();
-      node.buffer = clip;
-      node.connect(player.destination);
-      node.start();
-      source = node;
-      node.onended = stop;
-      setStatus("playing");
       return;
-    } catch {
-      if (controller.signal.aborted) return;
-      setError("ElevenLabs is unavailable. Using your device voice.");
     }
 
     if (!("speechSynthesis" in window) || !("SpeechSynthesisUtterance" in window)) {
