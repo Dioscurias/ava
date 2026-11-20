@@ -329,10 +329,15 @@ export function Agent({demo, intro = false}: {demo: boolean; intro?: boolean}) {
       <div className="composer-wrap">
         {notice && <p className="notice" role="status">{notice}</p>}
         <form className="composer" onSubmit={submit}>{!intro && <VoiceOrb listening={listening}/>}<input ref={inputRef} value={input} onChange={e => setInput(e.target.value)} maxLength={600} aria-label="Payment instruction" placeholder="Tell Ava what to do…"/>{state.microphone !== false && <button className="icon-button dictation-control" type="button" title="Dictate an instruction" aria-label={voiceSession ? "Stop voice conversation" : "Start voice conversation"} aria-pressed={voiceSession} onClick={dictate}>{listening ? <AudioLines size={20}/> : <Mic size={19}/>}<span>{voiceSession ? "Stop" : "Speak"}</span></button>}<button type="submit" className="send" aria-label="Send instruction" disabled={!input.trim() || leaving}><ArrowUp size={20}/></button></form>
-        <button className="reply-voice" type="button" aria-pressed={state.voice} onClick={toggleSpokenReplies}>
-          Spoken replies {state.voice ? "on" : "off"}
-        </button>
-        <p className="composer-caption" role="status">{listening ? transcript || "Listening…" : voiceSession ? "Ava is responding…" : ""}</p>
+        <div className="composer-meta">
+          <p className="voice-status" role="status" data-listening={listening}>
+            {voiceSession && <span className="voice-meter" aria-hidden="true"><i/><i/><i/><i/><i/></span>}
+            {listening ? transcript || "Listening…" : voiceSession ? "Ava is responding…" : ""}
+          </p>
+          <button className="reply-voice" type="button" aria-pressed={state.voice} onClick={toggleSpokenReplies}>
+            Spoken replies {state.voice ? "on" : "off"}
+          </button>
+        </div>
       </div>
   );
 
