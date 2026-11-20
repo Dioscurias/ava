@@ -7,10 +7,25 @@ type Playback = {stop: () => void};
 const currentPlayback = {stop: null as (() => void) | null};
 export function stopReplyVoice() {currentPlayback.stop?.();}
 
-export function ReplyVoice({text, elevenLabs, autoPlay}: {text:string; elevenLabs:boolean; autoPlay:boolean}) {
+let output: AudioContext | undefined;
+
+// Resume inside the click or submit handler, before synthesis or speech recognition.
+export function unlockReplyVoice() {
+  try {
+    const browser = window as Window & {webkitAudioContext?: typeof AudioContext};
+    const Context = window.AudioContext ?? browser.webkitAudioContext;
+    if (!Context) return;
+    output ??= new Context();
+    if (output.state !== "running") void output.resume().catch(() => {});
+  } catch {
+    // A blocked or unsupported audio context is handled by the player.
+  }
+}
+
+export function ReplyVoice({text, autoPlay}: {text:string; autoPlay:boolean}) {
   const active = useRef<Playback | null>(null);
   const autoStarted = useRef(false);
-  const cachedClip = useRef<Blob | null>(null);
+  const cachedClip = useRef<AudioBuffer | null>(null);
   const [status, setStatus] = useState<"idle" | "loading" | "playing">("idle");
   const [error, setError] = useState("");
 
@@ -21,16 +36,14 @@ export function ReplyVoice({text, elevenLabs, autoPlay}: {text:string; elevenLab
     currentPlayback.stop?.();
     setError("");
     const controller = new AbortController();
-    let audio: HTMLAudioElement | undefined;
-    let url: string | undefined;
+    let source: AudioBufferSourceNode | undefined;
     let utterance: SpeechSynthesisUtterance | undefined;
     const stop = () => {
       if (controller.signal.aborted) return;
       controller.abort();
       if (currentPlayback.stop === stop) currentPlayback.stop = null;
       active.current = null;
-      if (audio) {audio.pause();audio.removeAttribute("src");}
-      if (url) URL.revokeObjectURL(url);
+      if (source) {source.onended = null; source.stop(); source.disconnect();}
       if (utterance) window.speechSynthesis.cancel();
       setStatus("idle");
     };
@@ -38,39 +51,54 @@ export function ReplyVoice({text, elevenLabs, autoPlay}: {text:string; elevenLab
     currentPlayback.stop = stop;
     setStatus("loading");
 
-    if (elevenLabs) {
+    const player = output;
+    if (player && player.state !== "running") {
+      let timeout: number | undefined;
       try {
-        let clip = cachedClip.current;
-        if (!clip) {
-          const response = await fetch("/api/voice", {
-            method:"POST",
-            headers:{"Content-Type":"application/json"},
-            body:JSON.stringify({text:text.slice(0,600)}),
-            signal:controller.signal,
-          });
-          if (!response.ok) throw Error("Voice unavailable");
-          clip = await response.blob();
-          cachedClip.current = clip;
-        }
-        if (controller.signal.aborted) return;
-        url = URL.createObjectURL(clip);
-        audio = new Audio(url);
-        audio.onended = stop;
-        audio.onerror = () => {stop();setError("Could not play this reply.");};
-        await audio.play();
-        if (controller.signal.aborted) return;
-        setStatus("playing");
-        return;
-      } catch (error) {
-        if (error instanceof DOMException && error.name === "NotAllowedError") {
-          stop();
-          setError("Tap Listen to play this reply.");
-          return;
-        }
-        audio?.pause();
-        if (url) {URL.revokeObjectURL(url);url = undefined;}
-        if (controller.signal.aborted) return;
+        await Promise.race([player.resume(), new Promise(resolve => { timeout = window.setTimeout(resolve, 750); })]);
+      } catch {
+        // The state check below offers manual retry when audio remains locked.
+      } finally {
+        window.clearTimeout(timeout);
       }
+    }
+    if (controller.signal.aborted) return;
+    if (player?.state !== "running") {
+      stop();
+      setError("Tap Listen to enable audio.");
+      return;
+    }
+    try {
+      let clip = cachedClip.current;
+      if (!clip) {
+        const response = await fetch("/api/voice", {
+          method: "POST",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify({text: text.slice(0, 600)}),
+          signal: controller.signal,
+        });
+        if (!response.ok) throw Error("Voice unavailable");
+        clip = await player.decodeAudioData(await response.arrayBuffer());
+        if (controller.signal.aborted) return;
+        cachedClip.current = clip;
+      }
+      if (controller.signal.aborted) return;
+      if (player.state !== "running") {
+        stop();
+        setError("Tap Listen to resume audio.");
+        return;
+      }
+      const node = player.createBufferSource();
+      node.buffer = clip;
+      node.connect(player.destination);
+      node.start();
+      source = node;
+      node.onended = stop;
+      setStatus("playing");
+      return;
+    } catch {
+      if (controller.signal.aborted) return;
+      setError("ElevenLabs is unavailable. Using your device voice.");
     }
 
     if (!("speechSynthesis" in window) || !("SpeechSynthesisUtterance" in window)) {
@@ -87,7 +115,7 @@ export function ReplyVoice({text, elevenLabs, autoPlay}: {text:string; elevenLab
     };
     window.speechSynthesis.speak(utterance);
     setStatus("playing");
-  }, [elevenLabs, text]);
+  }, [text]);
 
   useEffect(() => {
     if (!autoPlay || autoStarted.current) return;
@@ -99,7 +127,7 @@ export function ReplyVoice({text, elevenLabs, autoPlay}: {text:string; elevenLab
   }, [autoPlay, play]);
 
   return <>
-    <button type="button" className="reply-voice" onClick={() => {autoStarted.current = true; void play();}} aria-label={status === "idle" ? "Listen to Ava’s reply" : "Stop spoken reply"}>
+    <button type="button" className="reply-voice" onClick={() => {autoStarted.current = true; if (!active.current) unlockReplyVoice(); void play();}} aria-label={status === "idle" ? "Listen to Ava’s reply" : "Stop spoken reply"}>
       {status === "idle" ? <Volume2 size={15}/> : <Square size={13}/>}
       {status === "idle" ? "Listen" : "Stop"}
     </button>

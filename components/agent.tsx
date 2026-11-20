@@ -2,7 +2,7 @@
 import Link from "next/link";
 import Image from "next/image";
 import {useRouter} from "next/navigation";
-import {ReplyVoice, stopReplyVoice} from "./reply-voice";
+import {ReplyVoice, stopReplyVoice, unlockReplyVoice} from "./reply-voice";
 import {VoiceOrb} from "./voice-orb";
 import {useWallet} from "@solana/wallet-adapter-react";
 import {useCallback, useEffect, useLayoutEffect, useRef, useState} from "react";
@@ -37,7 +37,7 @@ const prompts = [
   {label:"Get receiving details", value:"How do I receive USDC?"},
 ];
 
-export function Agent({demo, intro = false, elevenLabs = false}: {demo: boolean; intro?: boolean; elevenLabs?: boolean}) {
+export function Agent({demo, intro = false}: {demo: boolean; intro?: boolean}) {
   const router = useRouter();
   const {state, setState, ready, openingPrompt} = useWorkspace();
   const {publicKey} = useWallet();
@@ -126,6 +126,7 @@ export function Agent({demo, intro = false, elevenLabs = false}: {demo: boolean;
   }, [applyDraft, ready, setState, state]);
 
   const addTurn = useCallback((prompt: string) => {
+    stopReplyVoice();
     const revision = ++turnRevision.current;
     const id = crypto.randomUUID();
     let recognized = true;
@@ -201,6 +202,7 @@ export function Agent({demo, intro = false, elevenLabs = false}: {demo: boolean;
 
   function submit(event: React.FormEvent) {
     event.preventDefault();
+    if (state.voice && input.trim()) unlockReplyVoice();
     if (voiceRef.current) {
       voiceRef.current.onresult = null;
       voiceRef.current.onend = null;
@@ -226,6 +228,7 @@ export function Agent({demo, intro = false, elevenLabs = false}: {demo: boolean;
     const Engine = browser.SpeechRecognition ?? browser.webkitSpeechRecognition;
     if (!Engine) {setNotice("Voice input is unavailable in this browser. You can still type an instruction."); return;}
     stopReplyVoice();
+    if (state.voice) unlockReplyVoice();
     const recognition = new Engine();
     voiceRef.current = recognition;
     recognition.lang = "en-US";
@@ -271,6 +274,7 @@ export function Agent({demo, intro = false, elevenLabs = false}: {demo: boolean;
   }}>{prompt.label}<ArrowRight size={14}/></button>)}</div>;
   function toggleSpokenReplies() {
     if (state.voice) stopReplyVoice();
+    else unlockReplyVoice();
     setState(current => ({...current, voice: !current.voice}));
   }
 
@@ -306,11 +310,12 @@ export function Agent({demo, intro = false, elevenLabs = false}: {demo: boolean;
         <div className="turns" aria-live="polite">{turns.map(turn => <motion.article key={turn.id} initial={reduced || (arriving && turn === turns[0]) ? false : {opacity:0, y:8}} animate={{opacity:1,y:0}} className="turn">
           <p className="user-turn">{turn.prompt}</p>
           <div className="agent-turn"><Image className="reply-orb" src="/ava-reply-orb.webp" alt="" width={20} height={20} unoptimized/>
-            <div><div className="reply-heading"><strong>Ava</strong>{state.voice && !turn.pending && <ReplyVoice text={turn.reply} elevenLabs={elevenLabs} autoPlay={!listening && turn.id === turns.at(-1)?.id}/>}</div><p>{turn.reply}</p></div>
+            <div><div className="reply-heading"><strong>Ava</strong>{state.voice && !turn.pending && <ReplyVoice text={turn.reply} autoPlay={!listening && turn.id === turns.at(-1)?.id}/>}</div><p>{turn.reply}</p></div>
           </div>
         </motion.article>)}</div>
         <PaymentDraft memory={memory} highlighted={highlighted} escrow={escrow} canConfirm={ready && Boolean(readyDraft(memory))}
-          confirm={() => addTurn("Confirm")} undo={() => addTurn("Undo")}
+          confirm={() => {if (state.voice) unlockReplyVoice(); addTurn("Confirm");}}
+          undo={() => {if (state.voice) unlockReplyVoice(); addTurn("Undo");}}
           edit={(patch: Partial<Draft>) => {
             const next = editDraft(memoryRef.current, patch);
             applyDraft(next);
