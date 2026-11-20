@@ -1,12 +1,12 @@
 import Link from "next/link";
 import {Brand} from "../../components/brand";
 import {googleAuthEnabled} from "../../auth";
-import {redisEnabled} from "../../lib/stream-events.server";
+import {accountStorageEnabled} from "../../lib/account-workspace.server";
 import {continueWithGoogle} from "./actions";
 
 export default async function LoginPage({searchParams}: {searchParams: Promise<{error?:string}>}) {
   const {error} = await searchParams;
-  const enabled = googleAuthEnabled && redisEnabled();
+  const enabled = googleAuthEnabled && accountStorageEnabled();
   return <main className="app-main detail-page login-page">
     <Brand/>
     <h1>Sign in to Ava</h1>

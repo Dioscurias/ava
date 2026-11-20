@@ -1,6 +1,6 @@
 # Google sign-in for Ava
 
-A single **Continue with Google** action creates or opens the account. Auth.js v5 issues a JWT session. Ava uses the stable Google account ID from that session to find an independent Simulation workspace in the existing Upstash Redis database. First access seeds the same demo escrows in that workspace. Guest Simulation stays in the current browser’s local storage, and its data is not imported when signing in. The wallet-free Devnet judge flow keeps its own sponsor credentials and authorization.
+A single **Continue with Google** action creates or opens the account. Auth.js v5 issues a JWT session. Ava uses the stable Google account ID from that session to find an independent Simulation workspace in the Firestore database in Google Cloud. First access seeds the same demo escrows in that workspace. Guest Simulation stays in the current browser’s local storage, and its data is not imported when signing in. The wallet-free Devnet judge flow keeps its own sponsor credentials and authorization.
 
 ## Google Cloud Console
 
@@ -27,11 +27,19 @@ Generate each environment’s `AUTH_SECRET` with `openssl rand -base64 32`. Add 
 | `AUTH_GOOGLE_SECRET` | Web application's OAuth client secret. |
 | `AUTH_URL` | `http://localhost:3000` locally and `https://ava-puce-xi.vercel.app` in Production. |
 | `AUTH_TRUST_HOST` | Auth.js detects Vercel automatically. Set `true` explicitly if needed behind a trusted reverse proxy. |
-| `UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN` | Reuse Ava’s existing Upstash REST configuration. Use a writable token and preferably a separate Upstash database for local tests. |
+| `AVA_GOOGLE_CLOUD_PROJECT` | The Google Cloud project that contains the default Firestore database. |
+| `AVA_GOOGLE_SERVICE_ACCOUNT_JSON` | JSON credentials for an Ava-only service account granted Cloud Datastore User in that project. Store as a sensitive variable. |
+| `FIRESTORE_EMULATOR_HOST` | Optional for local development. With the emulator, omit the service account JSON and set the project ID. |
 
-Redeploy Production after saving the variables. Without Google or Upstash configuration, the login page leaves the guest path available.
+Redeploy Production after saving the variables. Without Google OAuth or Firestore configuration, the login page leaves the guest path available.
 
 [Auth.js deployment variables](https://authjs.dev/getting-started/deployment) · [Vercel environment variables](https://vercel.com/docs/environment-variables)
+
+## Firestore
+
+Use a Firestore Standard database in Native mode in the Google Cloud project. Ava stores each account in a separate server-only document and uses Firestore transactions to protect concurrent changes. Keep client access to the workspace collection closed. The app’s server service account uses IAM.
+
+[Firestore setup](https://cloud.google.com/firestore/docs/manage-databases) · [Firestore IAM roles](https://cloud.google.com/firestore/docs/security/iam)
 
 ## Smoke test
 

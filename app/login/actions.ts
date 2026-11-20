@@ -2,10 +2,10 @@
 
 import {redirect} from "next/navigation";
 import {googleAuthEnabled, signIn, signOut} from "../../auth";
-import {redisEnabled} from "../../lib/stream-events.server";
+import {accountStorageEnabled} from "../../lib/account-workspace.server";
 
 export async function continueWithGoogle() {
-  if (!googleAuthEnabled || !redisEnabled()) redirect("/login?error=Unavailable");
+  if (!googleAuthEnabled || !accountStorageEnabled()) redirect("/login?error=Unavailable");
   await signIn("google", {redirectTo:"/agent"});
 }
 
