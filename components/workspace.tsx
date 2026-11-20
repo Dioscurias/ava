@@ -55,13 +55,25 @@ export function Workspace({children}: {children: React.ReactNode}) {
   }, [state, ready]);
   const links = [{href:"/agent", label:"Agent", icon:MessageSquare},{href:"/activity",label:"Activity",icon:Activity},{href:"/settings",label:"Settings",icon:Settings2}];
   return <Store.Provider value={{state, setState, ready, openingPrompt}}><ConnectionProvider endpoint={endpoint}><WalletProvider wallets={adapters}><div className="workspace">
-    <header className="app-header"><Brand/><nav aria-label="Workspace">{links.map(({href,label,icon:Icon}) => <Link key={href} href={href} aria-current={path === href || (href === "/agent" && path.startsWith("/agent/")) || (href === "/activity" && path.startsWith("/payments")) ? "page" : undefined}><Icon size={16}/>{label}</Link>)}</nav><WalletMenu/></header>
-    <nav className="mode-switch" aria-label="Payment mode">
-      <Link href="/agent" aria-current={path !== "/devnet" ? "page" : undefined}>Simulation</Link>
-      <Link href="/devnet" aria-current={path === "/devnet" ? "page" : undefined}>Devnet</Link>
-    </nav>
+    <header className="app-header">
+      <Brand/>
+      <nav className="workspace-nav" aria-label="Workspace">
+        {links.map(({href, label, icon: Icon}) => (
+          <Link key={href} href={href} aria-current={path === href || (href === "/agent" && path.startsWith("/agent/")) || (href === "/activity" && path.startsWith("/payments")) ? "page" : undefined}>
+            <Icon size={16}/>{label}
+          </Link>
+        ))}
+      </nav>
+      <nav className="mode-switch" aria-label="Payment mode">
+        <Link href="/agent" aria-current={path !== "/devnet" ? "true" : undefined}>Simulation</Link>
+        <Link href="/devnet" aria-current={path === "/devnet" ? "true" : undefined}>Devnet</Link>
+      </nav>
+      <WalletMenu/>
+    </header>
+    <div className="workspace-body">
     {state.paused && <div className="paused-banner" role="status">Agent paused. <Link href="/settings">Manage permissions</Link></div>}
     {children}
     <footer className="app-footer"><CircleHelp size={14}/> {path === "/devnet" ? "Solana Devnet · Test tokens only" : "Simulation mode · No funds move on-chain"}</footer>
+    </div>
   </div></WalletProvider></ConnectionProvider></Store.Provider>;
 }

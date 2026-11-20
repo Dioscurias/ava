@@ -4,7 +4,6 @@ import {ArrowDown, ArrowUpRight} from "lucide-react";
 import {Brand} from "../components/brand";
 import {demoInstruction} from "../lib/payments";
 import {Reveal} from "../components/reveal";
-import {VoiceOrb} from "../components/voice-orb";
 
 const walkthrough = [
   {
@@ -42,8 +41,6 @@ const walkthrough = [
 export default function Home() {
   return <main className="landing">
     <section className="hero" aria-labelledby="hero-title">
-      <Image src="/ava-chamber.webp" alt="" fill priority unoptimized sizes="100vw" className="hero-image"/>
-      <div className="hero-orb" aria-hidden="true"><VoiceOrb listening={false} large chamberLight/></div>
       <header className="marketing-nav wrap">
         <Brand/>
         <nav aria-label="Main navigation"><a href="#how">How it works</a><a href="#safety">Safety</a></nav>
@@ -56,6 +53,25 @@ export default function Home() {
             <Link className="button primary" href="/agent">Talk to Ava <ArrowUpRight size={16}/></Link>
           </div>
         </div>
+        <figure className="hero-chat" aria-label="Example of drafting a payment with Ava">
+          <figcaption>Example conversation</figcaption>
+          <p className="user-turn">{demoInstruction}</p>
+          <div className="agent-turn">
+            <Image className="reply-orb" src="/ava-reply-orb.webp" alt="" width={20} height={20} unoptimized/>
+            <div>
+              <strong>Ava</strong>
+              <p>Review the terms before placing funds in escrow.</p>
+              <div className="draft payment-draft hero-draft">
+                <h3>Payment draft</h3>
+                <dl>
+                  <div><dt>Amount</dt><dd>250.00 USDC</dd></div>
+                  <div><dt>Recipient</dt><dd>Maya Chen</dd></div>
+                  <div><dt>Release condition</dt><dd>Final files delivered</dd></div>
+                </dl>
+              </div>
+            </div>
+          </div>
+        </figure>
       </div>
       <div className="hero-footer wrap"><a href="#how" className="text-link">How Ava works <ArrowDown size={15}/></a></div>
     </section>
