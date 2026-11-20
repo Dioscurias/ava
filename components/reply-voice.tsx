@@ -83,7 +83,7 @@ export function ReplyVoice({text, autoPlay}: {text:string; autoPlay:boolean}) {
         cachedClip.current = clip;
       } catch {
         if (controller.signal.aborted) return;
-        setError("Couldn’t load the ElevenLabs reply. Using your device voice.");
+        setError("Using your device voice.");
       }
     }
 
@@ -105,7 +105,7 @@ export function ReplyVoice({text, autoPlay}: {text:string; autoPlay:boolean}) {
           }
         } catch {
           if (controller.signal.aborted) return;
-          // Try native MP3 playback if Web Audio cannot decode or play the clip.
+          // Try native audio playback if Web Audio cannot decode or play the clip.
         }
       }
       try {
@@ -122,7 +122,7 @@ export function ReplyVoice({text, autoPlay}: {text:string; autoPlay:boolean}) {
         const blocked = error instanceof DOMException && error.name === "NotAllowedError";
         if (blocked) mediaUnlocked = false;
         stop();
-        setError(blocked ? "Tap Listen to enable audio." : "Couldn’t play the ElevenLabs reply.");
+        setError(blocked ? "Tap Listen to enable audio." : "Couldn’t play the spoken reply.");
       }
       return;
     }

@@ -1,43 +1,53 @@
-import {ElevenLabsClient, ElevenLabsError} from "@elevenlabs/elevenlabs-js";
-import {defaultAvaVoice} from "../../../lib/ava-voice";
+const defaultVoice = "db6b0ed5-d5d3-463d-ae85-518a07d3c2b4";
 
-export const maxDuration = 30;
+export const maxDuration = 20;
 
 export async function POST(request: Request) {
-  const apiKey = process.env.ELEVENLABS_API_KEY?.trim();
-  const voiceId = process.env.ELEVENLABS_VOICE_ID?.trim() || defaultAvaVoice;
-  if (!apiKey) return new Response(null,{status:503});
+  const apiKey = process.env.CARTESIA_API_KEY?.trim();
+  if (!apiKey) return new Response(null, {status: 503});
 
   let text: unknown;
-  try {text = (await request.json())?.text;} catch {return new Response(null,{status:400});}
+  try {
+    text = (await request.json())?.text;
+  } catch {
+    return new Response(null, {status: 400});
+  }
   if (typeof text !== "string" || !text.trim() || text.length > 600) {
-    return new Response(null,{status:400});
+    return new Response(null, {status: 400});
   }
 
   try {
-    const client = new ElevenLabsClient({apiKey});
-    const audio = await client.textToSpeech.convert(voiceId,{
-      text,
-      modelId:"eleven_multilingual_v2",
-      outputFormat:"mp3_44100_128",
-      voiceSettings:{stability:.48,similarityBoost:.76,speed:.96},
-    },{timeoutInSeconds:10,maxRetries:1,abortSignal:AbortSignal.any([request.signal, AbortSignal.timeout(23_000)])});
-    const clip = await new Response(audio).arrayBuffer();
-    if (clip.byteLength === 0) throw new Error("Empty audio");
-    return new Response(clip,{headers:{"Content-Type":"audio/mpeg","Cache-Control":"no-store"}});
-  } catch (error) {
-    if (error instanceof ElevenLabsError) {
-      const details = error.body as {detail?:{status?:unknown}} | undefined;
-      const code = details?.detail?.status;
-      const providerCode = typeof code === "string" && /^[a-z_]{1,50}$/.test(code) ? code : undefined;
-      console.warn("ElevenLabs synthesis failed", {providerStatus: error.statusCode, providerCode});
-      return Response.json({
-        providerStatus:error.statusCode,
-        providerCode,
-      },{status:502});
+    const response = await fetch("https://api.cartesia.ai/tts/bytes", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Cartesia-Version": "2026-08-14",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model_id: "sonic-3.6",
+        transcript: text.trim().replace(/\bUSDC\b/g, "U S D C"),
+        voice: process.env.CARTESIA_VOICE_ID?.trim() || defaultVoice,
+        language: "en",
+        normalization: "auto",
+        generation_config: {speed: 0.95},
+        output_format: {container: "wav", encoding: "pcm_s16le", sample_rate: 44100},
+      }),
+      signal: AbortSignal.any([request.signal, AbortSignal.timeout(12_000)]),
+    });
+    if (!response.ok) {
+      console.warn("Cartesia synthesis failed", {providerStatus: response.status});
+      return Response.json({providerStatus: response.status}, {status: 502});
     }
-    const reason = error instanceof Error ? error.name : "Unknown";
-    console.warn("ElevenLabs audio request did not complete", {reason});
-    return Response.json({providerCode:"audio_request_failed"},{status:502});
+
+    const audio = await response.arrayBuffer();
+    const header = new TextDecoder().decode(audio.slice(0, 12));
+    if (audio.byteLength <= 44 || !header.startsWith("RIFF") || !header.endsWith("WAVE")) {
+      throw new Error("Invalid WAV response");
+    }
+    return new Response(audio, {headers: {"Content-Type": "audio/wav", "Cache-Control": "no-store"}});
+  } catch (error) {
+    console.warn("Cartesia audio request did not complete", {reason: error instanceof Error ? error.name : "Unknown"});
+    return new Response(null, {status: 502});
   }
 }

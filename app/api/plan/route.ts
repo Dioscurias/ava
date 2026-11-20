@@ -49,13 +49,22 @@ export async function POST(request: Request) {
       }),
       signal: AbortSignal.timeout(12_000),
     });
-    if (!response.ok) throw new Error("Grok request failed");
+    if (!response.ok) {
+      const body = await response.json().catch(() => null);
+      const code = body?.error?.code ?? body?.code;
+      console.warn("Grok provider rejected the request", {
+        status: response.status,
+        code: typeof code === "string" && /^[a-z0-9_-]{1,80}$/i.test(code) ? code : undefined,
+      });
+      return Response.json({error: "AI planning is temporarily unavailable."}, {status: 502});
+    }
     const result = await response.json();
     const content = result.choices?.[0]?.message?.content;
     const plan = typeof content === "string" ? readPlan(JSON.parse(content)) : null;
     if (!plan) throw new Error("Invalid Grok response");
     return Response.json(plan);
-  } catch {
+  } catch (error) {
+    console.warn("Grok planner response failed", {reason: error instanceof Error ? error.name : "Unknown"});
     return Response.json({error: "AI planning is temporarily unavailable."}, {status: 502});
   }
 }

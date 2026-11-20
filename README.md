@@ -10,7 +10,7 @@ Ava turns a natural-language payment instruction into a USDC escrow proposal tha
 4. Select **Mark condition met**, confirm, then select **Release funds** and confirm. The timeline records each step. The Activity page shows the completed payment.
 5. In **Settings**, pause the agent and try confirming another draft. Ava blocks the action. Resume the agent to continue.
 
-The walkthrough needs no wallet, microphone, or API key. State is stored in the current browser. An installed Solana wallet is optional and enables public-address display. The **Speak** control uses browser dictation. **Listen** uses the ElevenLabs Sarah voice when the server-only `ELEVENLABS_API_KEY` is set. Set `ELEVENLABS_VOICE_ID` to override Sarah. Browser playback remains available when ElevenLabs is unconfigured or unavailable. Use a text-to-speech-scoped key with a provider credit limit for public demos.
+The walkthrough needs no wallet, microphone, or API key. State is stored in the current browser. An installed Solana wallet is optional and enables public-address display. The **Speak** control uses browser dictation. **Listen** and autoplay use Cartesia Sonic 3.6 with Skylar when the server-only `CARTESIA_API_KEY` is set in `.env.local` or in the Vercel Production environment. Set `CARTESIA_VOICE_ID` to use another voice. Redeploy after changing Production variables. Device speech remains available when Cartesia is unconfigured or unavailable.
 
 ## Simulation boundary
 
